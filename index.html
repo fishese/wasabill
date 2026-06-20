@@ -340,6 +340,10 @@
     background:rgba(255,255,255,0.2); color:#fff; padding:4px 10px; border-radius:20px;
     margin-top:2px;
   }
+  .connection-banner{
+    background:#F5A623; color:#3A3532; text-align:center; font-weight:700; font-size:13px;
+    padding:8px 12px;
+  }
 </style>
 </head>
 <body>
@@ -356,6 +360,10 @@
     </div>
     <button class="btn ghost" id="lobbyOfflineBtn" style="width:100%; margin-top:18px;">離線使用（唔同步）</button>
   </div>
+</div>
+
+<div id="connectionBanner" class="connection-banner" style="display:none;">
+  <span id="connectionBannerText"></span>
 </div>
 
 <div class="header-top">
@@ -566,7 +574,10 @@ const i18n = {
     lobbyInvalidCode:"Couldn't find that room code",
     lobbyNetworkError:"Couldn't reach the server — check your connection",
     onlineEditLockedTitle:'Locked while in a shared room (coming soon)',
-    onlineTapFailed:"Couldn't save that tap — check your connection"
+    onlineTapFailed:"Couldn't save that tap — check your connection",
+    connectionLost:'⚠️ Reconnecting — tallying paused',
+    connectionRestored:'Back online — synced up',
+    onlineTapPausedMsg:"Reconnecting — can't tally right now"
   },
   zh: {
     title:'壽司分帳機', headerTitle:'🍣 數碟郎 — 迴轉壽司分帳機',
@@ -611,7 +622,10 @@ const i18n = {
     lobbyInvalidCode:'搵唔到呢個房間代碼',
     lobbyNetworkError:'連接唔到伺服器，請檢查網絡',
     onlineEditLockedTitle:'連線中暫時鎖定（功能陸續有來）',
-    onlineTapFailed:'呢個動作未儲到，請檢查網絡'
+    onlineTapFailed:'呢個動作未儲到，請檢查網絡',
+    connectionLost:'⚠️ 重新連接中 — 已暫停計帳',
+    connectionRestored:'已重新連線，資料已更新',
+    onlineTapPausedMsg:'重新連接中，未能計帳'
   }
 };
 
@@ -626,6 +640,24 @@ let menuItemIdByDishKey = {};       // dish_key -> server menu_item uuid (for se
 let dishKeyByMenuItemId = {};       // server menu_item uuid -> dish_key (for folding events)
 let seenEventIds = new Set();       // event_ids already applied -- guards against double-counting
 let roomChannel = null;             // the live realtime subscription for the current room
+let browserOnline = navigator.onLine;  // does the browser itself think it has a connection
+let channelConnected = false;          // is our realtime subscription actually live right now
+
+function isConnected() { return browserOnline && channelConnected; }
+
+function updateConnectionUI() {
+  const banner = document.getElementById('connectionBanner');
+  if (!isOnline) { banner.style.display = 'none'; return; } // only relevant while in a room
+  if (isConnected()) {
+    banner.style.display = 'none';
+  } else {
+    document.getElementById('connectionBannerText').textContent = i18n[currentLang].connectionLost;
+    banner.style.display = 'block';
+  }
+}
+
+window.addEventListener('online',  () => { browserOnline = true;  updateConnectionUI(); });
+window.addEventListener('offline', () => { browserOnline = false; updateConnectionUI(); });
 const DEFAULT_BY_ID = {};
 DEFAULT_STANDARD.forEach(d => DEFAULT_BY_ID[d.id] = d);
 
@@ -910,6 +942,11 @@ function changeDishCount(pIndex, d, delta) {
     const room = getRoom();
     const itemId = menuItemIdByDishKey[d.id];
     if (!room || !itemId) return;
+    if (!isConnected()) {
+      // writes are paused (not queued) while disconnected -- last-known state stays untouched
+      toast(t.onlineTapPausedMsg);
+      return;
+    }
 
     if (applyAll && delta > 0) {
       tally.people.forEach((person, i) => {
@@ -1322,6 +1359,15 @@ function useOffline() {
 // render/calc function (computeBillBreakdown, renderTally, renderStickyNav...)
 // runs unchanged on synced data.
 function enterRoom(snap) {
+  applySnapshot(snap);
+  subscribeToRoom(snap.bill.id);
+}
+
+// Pure state update: turns a join_room-shaped snapshot into settings/tally.
+// Split out from enterRoom() so reconnect-resyncing can re-apply a fresh
+// snapshot WITHOUT tearing down and recreating the realtime subscription
+// (that would self-trigger from inside its own "just reconnected" callback).
+function applySnapshot(snap) {
   isOnline = true;
   menuItemIdByDishKey = {};
   dishKeyByMenuItemId = {};
@@ -1372,20 +1418,40 @@ function enterRoom(snap) {
 
   renderSettings();
   renderTally();
-  subscribeToRoom(snap.bill.id);
 }
 
 // Live updates: push new taps and new diners to every phone in the room
-// without anyone needing to reload.
+// without anyone needing to reload. Also doubles as our connection-status
+// sensor: its subscribe status tells us whether we're actually still live.
 function subscribeToRoom(billId) {
   if (roomChannel) { supabaseClient.removeChannel(roomChannel); roomChannel = null; }
+  channelConnected = false;
+  let firstConnect = true; // skip the redundant resync right after the very first subscribe
   roomChannel = supabaseClient
     .channel('room-' + billId)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'plate_events', filter: `bill_id=eq.${billId}` },
         payload => applyRemoteEvent(payload.new))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
         payload => applyRemoteDiner(payload.new))
-    .subscribe();
+    .subscribe((status) => {
+      const wasConnected = channelConnected;
+      channelConnected = (status === 'SUBSCRIBED');
+      updateConnectionUI();
+      if (channelConnected && !wasConnected && !firstConnect) resyncRoom();
+      if (channelConnected) firstConnect = false;
+    });
+}
+
+// Called when the realtime connection comes back after being down. We didn't
+// queue anything while disconnected, so we just re-fetch the room's full
+// current state and re-fold it -- guaranteed correct, never merges.
+async function resyncRoom() {
+  const room = getRoom();
+  if (!room) return;
+  const { data, error } = await supabaseClient.rpc('join_room', { p_room: room.room_code });
+  if (error || !data) { console.error('resync after reconnect failed:', error); return; }
+  applySnapshot(data);
+  toast(i18n[currentLang].connectionRestored);
 }
 
 // A tap arrived from the server (could be our own echoed back, or someone else's).
