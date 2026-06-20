@@ -624,6 +624,8 @@ window.dishRefreshers = {}; // Registry to decouple DOM from refresh actions
 let isOnline = false;               // true once Start New Bill / Join succeeds
 let menuItemIdByDishKey = {};       // dish_key -> server menu_item uuid (for sending taps)
 let dishKeyByMenuItemId = {};       // server menu_item uuid -> dish_key (for folding events)
+let seenEventIds = new Set();       // event_ids already applied -- guards against double-counting
+let roomChannel = null;             // the live realtime subscription for the current room
 const DEFAULT_BY_ID = {};
 DEFAULT_STANDARD.forEach(d => DEFAULT_BY_ID[d.id] = d);
 
@@ -921,6 +923,7 @@ function changeDishCount(pIndex, d, delta) {
 
       const roundId = room.device_id + '_' + Date.now();
       const dinerIds = tally.people.map(p => p.id);
+      dinerIds.forEach(id => seenEventIds.add(roundId + ':' + id)); // matches the server's derived event_id per diner
       supabaseClient.rpc('tap_everyone', {
         p_bill: room.bill_id, p_item: itemId, p_delta: delta,
         p_round_id: roundId, p_diner_ids: dinerIds, p_device: room.device_id
@@ -941,6 +944,7 @@ function changeDishCount(pIndex, d, delta) {
       if (window.dishRefreshers[`${pIndex}-${d.id}`]) window.dishRefreshers[`${pIndex}-${d.id}`]();
 
       const eventId = room.device_id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      seenEventIds.add(eventId);
       supabaseClient.rpc('tap', {
         p_bill: room.bill_id, p_diner: person.id, p_item: itemId,
         p_delta: delta, p_event_id: eventId, p_device: room.device_id
@@ -1321,6 +1325,7 @@ function enterRoom(snap) {
   isOnline = true;
   menuItemIdByDishKey = {};
   dishKeyByMenuItemId = {};
+  seenEventIds = new Set();
 
   settings.standard = [];
   settings.seasonal = [];
@@ -1350,6 +1355,7 @@ function enterRoom(snap) {
   const countsByDiner = {};
   (snap.diners || []).forEach(d => countsByDiner[d.id] = {});
   (snap.events || []).forEach(ev => {
+    seenEventIds.add(ev.event_id);
     const dishKey = dishKeyByMenuItemId[ev.menu_item_id];
     const bucket = countsByDiner[ev.diner_id];
     if (!dishKey || !bucket) return;
@@ -1365,6 +1371,45 @@ function enterRoom(snap) {
   if (tally.people.length === 0) tally.people = [{ id: null, name: '', counts: {} }];
 
   renderSettings();
+  renderTally();
+  subscribeToRoom(snap.bill.id);
+}
+
+// Live updates: push new taps and new diners to every phone in the room
+// without anyone needing to reload.
+function subscribeToRoom(billId) {
+  if (roomChannel) { supabaseClient.removeChannel(roomChannel); roomChannel = null; }
+  roomChannel = supabaseClient
+    .channel('room-' + billId)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'plate_events', filter: `bill_id=eq.${billId}` },
+        payload => applyRemoteEvent(payload.new))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
+        payload => applyRemoteDiner(payload.new))
+    .subscribe();
+}
+
+// A tap arrived from the server (could be our own echoed back, or someone else's).
+function applyRemoteEvent(ev) {
+  if (seenEventIds.has(ev.event_id)) return; // already applied (our own tap, or a repeat)
+  seenEventIds.add(ev.event_id);
+
+  const dishKey = dishKeyByMenuItemId[ev.menu_item_id];
+  const pIndex = tally.people.findIndex(p => p.id === ev.diner_id);
+  if (!dishKey || pIndex === -1) return;
+
+  const person = tally.people[pIndex];
+  const newVal = (person.counts[dishKey] || 0) + Number(ev.delta);
+  person.counts[dishKey] = Math.max(0, newVal);
+  if (!person.counts[dishKey]) delete person.counts[dishKey];
+
+  if (window.dishRefreshers[`${pIndex}-${dishKey}`]) window.dishRefreshers[`${pIndex}-${dishKey}`]();
+  recalc();
+}
+
+// Someone else just joined the room -- give them a tile without anyone reloading.
+function applyRemoteDiner(diner) {
+  if (tally.people.some(p => p.id === diner.id)) return; // it's us, or already known
+  tally.people.push({ id: diner.id, name: diner.name || '', counts: {} });
   renderTally();
 }
 
