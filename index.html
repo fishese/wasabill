@@ -319,12 +319,48 @@
   .amt-wrap .unit{font-size:15px; font-weight:700; color:var(--muted); min-width:16px}
   #discountFields{display:none; background: rgba(0,0,0,0.02); padding: 0 14px 14px; border-radius: 16px; margin-top: 10px;}
   #discountFields.open{display:block; animation: fadeIn 0.3s ease;}
+
+  /* ── lobby overlay ── */
+  .lobby-overlay{
+    position:fixed; inset:0; z-index:100;
+    background: rgba(58,53,50,0.55);
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .lobby-overlay.hidden{display:none}
+  .lobby-card{
+    background:#fff; border-radius:24px; padding:28px 24px; max-width:380px; width:100%;
+    box-shadow:0 12px 32px rgba(0,0,0,0.25); text-align:center;
+  }
+  .lobby-divider{display:flex; align-items:center; gap:10px; margin:14px 0; color:var(--muted); font-size:12px}
+  .lobby-divider::before, .lobby-divider::after{content:''; flex:1; border-top:1px dashed var(--line)}
+  .lobby-join-row{display:flex; gap:8px}
+  .room-badge{
+    display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700;
+    background:rgba(255,255,255,0.2); color:#fff; padding:4px 10px; border-radius:20px;
+    margin-top:2px;
+  }
 </style>
 </head>
 <body>
 
+<div id="lobbyOverlay" class="lobby-overlay">
+  <div class="lobby-card">
+    <h1 id="lblLobbyTitle" style="margin:0 0 4px; font-size:20px;">🍣 數碟郎</h1>
+    <p class="muted" id="lblLobbySub" style="margin:0 0 18px;">同枱齊齊計數</p>
+    <button class="btn primary" id="lobbyStartBtn" style="width:100%; margin-bottom:14px;">開新帳單</button>
+    <div class="lobby-divider" id="lblLobbyOr">或者</div>
+    <div class="lobby-join-row">
+      <input class="text" id="lobbyCodeInput" placeholder="房間代碼，例如 tea-red">
+      <button class="btn ghost" id="lobbyJoinBtn">加入</button>
+    </div>
+    <button class="btn ghost" id="lobbyOfflineBtn" style="width:100%; margin-top:18px;">離線使用（唔同步）</button>
+  </div>
+</div>
+
 <div class="header-top">
   <h1 id="lblHeaderTitle">🍣 數碟郎 — 迴轉壽司分帳機</h1>
+  <div id="roomBadge" class="room-badge" style="display:none;"></div>
 </div>
 
 <div class="sticky-tabs">
@@ -520,7 +556,15 @@ const i18n = {
     msgPricesReset:'Prices reset', msgPriceUpdated:'Price updated',
     seasonalDefaultName:'Seasonal', delTitle:'Remove', seasonalBadge:'seasonal',
     copiedToast:'Copied to clipboard!', langBtn:'中',
-    plates: ' plates', totalPlates: 'Total plates', maxPeopleMsg:'Maximum 8 people'
+    plates: ' plates', totalPlates: 'Total plates', maxPeopleMsg:'Maximum 8 people',
+    lobbyTitle:'🍣 Kaiten Sushi', lobbySub:'Split the bill together, live',
+    lobbyStartBtn:'Start New Bill', lobbyOr:'or', lobbyCodePlaceholder:'Room code, e.g. tea-red',
+    lobbyJoinBtn:'Join', lobbyOfflineBtn:'Use offline (no sync)',
+    lobbyEnterName:"What's your name?",
+    lobbyRoomCreated:'Room created: {code} — share this code with your table',
+    lobbyJoinedRoom:'Joined room: {code}',
+    lobbyInvalidCode:"Couldn't find that room code",
+    lobbyNetworkError:"Couldn't reach the server — check your connection"
   },
   zh: {
     title:'壽司分帳機', headerTitle:'🍣 數碟郎 — 迴轉壽司分帳機',
@@ -555,7 +599,15 @@ const i18n = {
     msgPricesReset:'價格已重設', msgPriceUpdated:'價格已更新',
     seasonalDefaultName:'限定項目', delTitle:'刪除', seasonalBadge:'限定',
     copiedToast:'已複製到剪貼板！', langBtn:'EN',
-    plates: ' 碟', totalPlates: '總碟數', maxPeopleMsg:'最多 8 人'
+    plates: ' 碟', totalPlates: '總碟數', maxPeopleMsg:'最多 8 人',
+    lobbyTitle:'🍣 數碟郎', lobbySub:'同枱齊齊計數',
+    lobbyStartBtn:'開新帳單', lobbyOr:'或者', lobbyCodePlaceholder:'房間代碼，例如 tea-red',
+    lobbyJoinBtn:'加入', lobbyOfflineBtn:'離線使用（唔同步）',
+    lobbyEnterName:'你叫咩名？',
+    lobbyRoomCreated:'開咗新房間：{code}　快啲分享俾枱上嘅人',
+    lobbyJoinedRoom:'已加入房間：{code}',
+    lobbyInvalidCode:'搵唔到呢個房間代碼',
+    lobbyNetworkError:'連接唔到伺服器，請檢查網絡'
   }
 };
 
@@ -634,6 +686,13 @@ function updateStaticLabels() {
   document.getElementById('addSeas').textContent            = t.addBtn;
   document.getElementById('resetPrices').textContent        = t.resetPricesBtn;
   document.getElementById('langToggleBtn').textContent      = t.langBtn;
+  document.getElementById('lblLobbyTitle').textContent      = t.lobbyTitle;
+  document.getElementById('lblLobbySub').textContent        = t.lobbySub;
+  document.getElementById('lobbyStartBtn').textContent      = t.lobbyStartBtn;
+  document.getElementById('lblLobbyOr').textContent         = t.lobbyOr;
+  document.getElementById('lobbyCodeInput').placeholder     = t.lobbyCodePlaceholder;
+  document.getElementById('lobbyJoinBtn').textContent       = t.lobbyJoinBtn;
+  document.getElementById('lobbyOfflineBtn').textContent    = t.lobbyOfflineBtn;
 }
 function getDishName(d) {
   if (d.seasonal) return d.name;
@@ -1083,6 +1142,76 @@ function copyBillSummary() {
   });
 }
 
+/* ── multiplayer: lobby ── */
+function getDeviceId() {
+  let id = localStorage.getItem('kaiten_device_id_v1');
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : 'dev_' + Date.now() + '_' + Math.random().toString(16).slice(2));
+    localStorage.setItem('kaiten_device_id_v1', id);
+  }
+  return id;
+}
+function saveRoom(room) { localStorage.setItem('kaiten_room_v1', JSON.stringify(room)); }
+function getRoom() { try { return JSON.parse(localStorage.getItem('kaiten_room_v1')); } catch(e) { return null; } }
+
+function showRoomBadge(roomCode) {
+  const badge = document.getElementById('roomBadge');
+  badge.textContent = '🔗 ' + roomCode;
+  badge.style.display = 'inline-flex';
+}
+function hideLobby() {
+  document.getElementById('lobbyOverlay').classList.add('hidden');
+}
+
+async function startNewBill() {
+  const t = i18n[currentLang];
+  const name = prompt(t.lobbyEnterName) || '';
+  const btn = document.getElementById('lobbyStartBtn');
+  btn.disabled = true;
+  const { data, error } = await supabaseClient.rpc('create_bill', { p_host_name: name });
+  btn.disabled = false;
+  if (error || !data) {
+    console.error('create_bill failed:', error);
+    toast(t.lobbyNetworkError);
+    return;
+  }
+  saveRoom({ bill_id: data.bill.id, room_code: data.bill.room_code, diner_id: data.host_diner_id, device_id: getDeviceId() });
+  showRoomBadge(data.bill.room_code);
+  hideLobby();
+  toast(t.lobbyRoomCreated.replace('{code}', data.bill.room_code));
+}
+
+async function joinRoomByCode() {
+  const t = i18n[currentLang];
+  const input = document.getElementById('lobbyCodeInput');
+  const code = input.value.trim().toLowerCase();
+  if (!code) return;
+  const btn = document.getElementById('lobbyJoinBtn');
+  btn.disabled = true;
+  const { data, error } = await supabaseClient.rpc('join_room', { p_room: code });
+  if (error || !data || !data.bill) {
+    btn.disabled = false;
+    toast(t.lobbyInvalidCode);
+    return;
+  }
+  const name = prompt(t.lobbyEnterName) || '';
+  const { data: newDinerId, error: dinerErr } = await supabaseClient.rpc('add_diner', { p_bill: data.bill.id, p_name: name });
+  btn.disabled = false;
+  if (dinerErr) {
+    console.error('add_diner failed:', dinerErr);
+    toast(t.lobbyNetworkError);
+    return;
+  }
+  saveRoom({ bill_id: data.bill.id, room_code: data.bill.room_code, diner_id: newDinerId, device_id: getDeviceId() });
+  showRoomBadge(data.bill.room_code);
+  hideLobby();
+  toast(t.lobbyJoinedRoom.replace('{code}', data.bill.room_code));
+}
+
+function useOffline() {
+  hideLobby();
+}
+
 /* ── actions ── */
 function addSeasonal() {
   const t     = i18n[currentLang];
@@ -1173,21 +1302,15 @@ document.getElementById('copyBill').onclick    = copyBillSummary;
 document.getElementById('resetPrices').onclick = resetPrices;
 document.getElementById('langToggleBtn').onclick = () => setLanguage(currentLang === 'en' ? 'zh' : 'en');
 
+document.getElementById('lobbyStartBtn').onclick   = startNewBill;
+document.getElementById('lobbyJoinBtn').onclick    = joinRoomByCode;
+document.getElementById('lobbyOfflineBtn').onclick = useOffline;
+document.getElementById('lobbyCodeInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoomByCode(); });
+
 /* ── init ── */
 updateStaticLabels();
 renderSettings();
 renderTally();
-
-/* ── multiplayer: one-time check that we can reach the server (temporary —
-   removed once real room-joining logic replaces it) ── */
-supabaseClient.rpc('ping').then(({ error }) => {
-  if (error) {
-    console.error('Supabase connection check failed:', error);
-    toast('⚠️ Server unreachable (offline mode still works)');
-  } else {
-    toast('✅ Connected to server');
-  }
-});
 </script>
 </body>
 </html>
