@@ -1,8 +1,8 @@
-const CACHE = 'sushi-split-v2';
+const CACHE = 'sushi-split-v3';
 const ASSETS = [
-  './sushi-split.html',
+  './index.html',
   './manifest.json',
-  './icon.svg'
+  './sushiicon.svg'
 ];
 
 // Cache all assets on install

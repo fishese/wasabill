@@ -3,7 +3,7 @@
   "name": "數碟郎 sushi split",
   "short_name": "sushi split",
   "description": "數碟郎 — 迴轉壽司分帳機 — Kaiten sushi bill splitter",
-  "start_url": "./sushi-split.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#D84A46",
