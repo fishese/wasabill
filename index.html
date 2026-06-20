@@ -564,7 +564,9 @@ const i18n = {
     lobbyRoomCreated:'Room created: {code} — share this code with your table',
     lobbyJoinedRoom:'Joined room: {code}',
     lobbyInvalidCode:"Couldn't find that room code",
-    lobbyNetworkError:"Couldn't reach the server — check your connection"
+    lobbyNetworkError:"Couldn't reach the server — check your connection",
+    onlineEditLockedTitle:'Locked while in a shared room (coming soon)',
+    onlineTapFailed:"Couldn't save that tap — check your connection"
   },
   zh: {
     title:'壽司分帳機', headerTitle:'🍣 數碟郎 — 迴轉壽司分帳機',
@@ -607,7 +609,9 @@ const i18n = {
     lobbyRoomCreated:'開咗新房間：{code}　快啲分享俾枱上嘅人',
     lobbyJoinedRoom:'已加入房間：{code}',
     lobbyInvalidCode:'搵唔到呢個房間代碼',
-    lobbyNetworkError:'連接唔到伺服器，請檢查網絡'
+    lobbyNetworkError:'連接唔到伺服器，請檢查網絡',
+    onlineEditLockedTitle:'連線中暫時鎖定（功能陸續有來）',
+    onlineTapFailed:'呢個動作未儲到，請檢查網絡'
   }
 };
 
@@ -615,6 +619,13 @@ let currentLang = localStorage.getItem(LS_LANG) || 'zh';
 let settings = loadSettings();
 let tally    = loadTally();
 window.dishRefreshers = {}; // Registry to decouple DOM from refresh actions
+
+/* ── multiplayer: room state ── */
+let isOnline = false;               // true once Start New Bill / Join succeeds
+let menuItemIdByDishKey = {};       // dish_key -> server menu_item uuid (for sending taps)
+let dishKeyByMenuItemId = {};       // server menu_item uuid -> dish_key (for folding events)
+const DEFAULT_BY_ID = {};
+DEFAULT_STANDARD.forEach(d => DEFAULT_BY_ID[d.id] = d);
 
 /* ── persistence ── */
 function loadSettings() {
@@ -646,7 +657,7 @@ function fresh() {
     discount:{enabled:false, type:'pct', amount:0}
   };
 }
-function saveSettings() { localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); }
+function saveSettings() { if (isOnline) return; localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); }
 function loadTally() {
   try {
     const t = JSON.parse(localStorage.getItem(LS_TALLY));
@@ -654,7 +665,7 @@ function loadTally() {
   } catch(e) {}
   return { people:[{name:'', counts:{}}] };
 }
-function saveTally() { localStorage.setItem(LS_TALLY, JSON.stringify(tally)); }
+function saveTally() { if (isOnline) return; localStorage.setItem(LS_TALLY, JSON.stringify(tally)); }
 
 /* ── i18n ── */
 function updateStaticLabels() {
@@ -857,13 +868,23 @@ function computeBillBreakdown() {
 /* ── render tally ── */
 function renderPeopleCount() {
   document.getElementById('peopleNum').textContent  = tally.people.length;
-  document.getElementById('peopleMinus').disabled   = tally.people.length <= 1;
+  const lockTitle = isOnline ? i18n[currentLang].onlineEditLockedTitle : '';
+
+  const minusBtn = document.getElementById('peopleMinus');
+  minusBtn.disabled = tally.people.length <= 1 || isOnline;
+  minusBtn.title     = lockTitle;
+
   const plusBtn = document.getElementById('peoplePlus');
-  plusBtn.disabled = tally.people.length >= MAX_PEOPLE;
-  plusBtn.title    = tally.people.length >= MAX_PEOPLE ? i18n[currentLang].maxPeopleMsg : '';
+  plusBtn.disabled = tally.people.length >= MAX_PEOPLE || isOnline;
+  plusBtn.title    = isOnline ? lockTitle : (tally.people.length >= MAX_PEOPLE ? i18n[currentLang].maxPeopleMsg : '');
+
+  const newBillBtn = document.getElementById('newBill');
+  newBillBtn.disabled = isOnline;
+  newBillBtn.title    = lockTitle;
 }
 
 function setPeople(delta) {
+  if (isOnline) return;
   const n = tally.people.length + delta;
   if (n < 1 || n > MAX_PEOPLE) return;
   if (delta < 0) {
@@ -881,7 +902,58 @@ function setPeople(delta) {
 function changeDishCount(pIndex, d, delta) {
   const applyAllToggle = document.getElementById('applyAllToggle');
   const applyAll = applyAllToggle.checked;
+  const t = i18n[currentLang];
 
+  if (isOnline) {
+    const room = getRoom();
+    const itemId = menuItemIdByDishKey[d.id];
+    if (!room || !itemId) return;
+
+    if (applyAll && delta > 0) {
+      tally.people.forEach((person, i) => {
+        let newVal = (person.counts[d.id] || 0) + delta;
+        person.counts[d.id] = Math.max(0, newVal);
+        if (!person.counts[d.id]) delete person.counts[d.id];
+        if (window.dishRefreshers[`${i}-${d.id}`]) window.dishRefreshers[`${i}-${d.id}`]();
+      });
+      applyAllToggle.checked = false;
+      toast(t.toastAddAllAndOff);
+
+      const roundId = room.device_id + '_' + Date.now();
+      const dinerIds = tally.people.map(p => p.id);
+      supabaseClient.rpc('tap_everyone', {
+        p_bill: room.bill_id, p_item: itemId, p_delta: delta,
+        p_round_id: roundId, p_diner_ids: dinerIds, p_device: room.device_id
+      }).then(({ error }) => {
+        if (error) { console.error('tap_everyone failed:', error); toast(t.onlineTapFailed); }
+      });
+
+    } else {
+      if (applyAll && delta < 0) {
+        applyAllToggle.checked = false;
+        toast(t.toastRemoveOne);
+      }
+
+      const person = tally.people[pIndex];
+      let newVal = (person.counts[d.id] || 0) + delta;
+      person.counts[d.id] = Math.max(0, newVal);
+      if (!person.counts[d.id]) delete person.counts[d.id];
+      if (window.dishRefreshers[`${pIndex}-${d.id}`]) window.dishRefreshers[`${pIndex}-${d.id}`]();
+
+      const eventId = room.device_id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      supabaseClient.rpc('tap', {
+        p_bill: room.bill_id, p_diner: person.id, p_item: itemId,
+        p_delta: delta, p_event_id: eventId, p_device: room.device_id
+      }).then(({ error }) => {
+        if (error) { console.error('tap failed:', error); toast(t.onlineTapFailed); }
+      });
+    }
+
+    recalc();
+    return; // online taps persist on the server, not in localStorage
+  }
+
+  // ── offline (unchanged from the original app) ──
   // "All in" is ADD-only. A remove (delta < 0) always affects just the clicked box.
   if (applyAll && delta > 0) {
     tally.people.forEach((person, i) => {
@@ -893,7 +965,7 @@ function changeDishCount(pIndex, d, delta) {
 
     // Switch off automatically (one-use only logic)
     applyAllToggle.checked = false;
-    toast(i18n[currentLang].toastAddAllAndOff);
+    toast(t.toastAddAllAndOff);
 
   } else {
     // Single-box add/remove. If "All in" is armed and this is a remove,
@@ -901,7 +973,7 @@ function changeDishCount(pIndex, d, delta) {
     // later stray tap can't accidentally fire a round for everyone.
     if (applyAll && delta < 0) {
       applyAllToggle.checked = false;
-      toast(i18n[currentLang].toastRemoveOne);
+      toast(t.toastRemoveOne);
     }
 
     let person = tally.people[pIndex];
@@ -977,6 +1049,8 @@ function renderTally() {
     const inp = document.createElement('input');
     inp.placeholder = i18n[currentLang].personDefault + (idx + 1);
     inp.value   = p.name;
+    inp.disabled = isOnline;
+    inp.title    = isOnline ? i18n[currentLang].onlineEditLockedTitle : '';
     inp.onfocus = () => inp.select();
     inp.oninput = () => { p.name = inp.value; saveTally(); renderStickyNav(computeBillBreakdown()); };
 
@@ -1169,13 +1243,29 @@ async function startNewBill() {
   const btn = document.getElementById('lobbyStartBtn');
   btn.disabled = true;
   const { data, error } = await supabaseClient.rpc('create_bill', { p_host_name: name });
-  btn.disabled = false;
   if (error || !data) {
+    btn.disabled = false;
     console.error('create_bill failed:', error);
     toast(t.lobbyNetworkError);
     return;
   }
+
+  // a fresh room has no menu yet -- seed it with the same default plates the offline app uses
+  const seedResults = await Promise.all(DEFAULT_STANDARD.map(d =>
+    supabaseClient.rpc('add_menu_item', { p_bill: data.bill.id, p_dish_key: d.id, p_name: d.name, p_price: d.price, p_kind: 'standard' })
+      .then(r => ({ dishKey: d.id, ...r }))
+  ));
+  btn.disabled = false;
+
+  const failed = seedResults.filter(r => r.error);
+  if (failed.length) console.error('some default dishes failed to seed:', failed);
+  const menuItems = seedResults.filter(r => !r.error).map(r => ({
+    id: r.data, dish_key: r.dishKey, name: DEFAULT_BY_ID[r.dishKey].name,
+    price: DEFAULT_BY_ID[r.dishKey].price, kind: 'standard', is_active: true
+  }));
+
   saveRoom({ bill_id: data.bill.id, room_code: data.bill.room_code, diner_id: data.host_diner_id, device_id: getDeviceId() });
+  enterRoom({ bill: data.bill, diners: data.diners, menu_items: menuItems, events: [] });
   showRoomBadge(data.bill.room_code);
   hideLobby();
   toast(t.lobbyRoomCreated.replace('{code}', data.bill.room_code));
@@ -1196,20 +1286,86 @@ async function joinRoomByCode() {
   }
   const name = prompt(t.lobbyEnterName) || '';
   const { data: newDinerId, error: dinerErr } = await supabaseClient.rpc('add_diner', { p_bill: data.bill.id, p_name: name });
-  btn.disabled = false;
   if (dinerErr) {
+    btn.disabled = false;
     console.error('add_diner failed:', dinerErr);
     toast(t.lobbyNetworkError);
     return;
   }
-  saveRoom({ bill_id: data.bill.id, room_code: data.bill.room_code, diner_id: newDinerId, device_id: getDeviceId() });
-  showRoomBadge(data.bill.room_code);
+
+  // re-fetch the full room state now that we've been added, so the fold includes us
+  const fresh = await supabaseClient.rpc('join_room', { p_room: code });
+  btn.disabled = false;
+  if (fresh.error || !fresh.data) {
+    console.error('re-fetch after join failed:', fresh.error);
+    toast(t.lobbyNetworkError);
+    return;
+  }
+
+  saveRoom({ bill_id: fresh.data.bill.id, room_code: fresh.data.bill.room_code, diner_id: newDinerId, device_id: getDeviceId() });
+  enterRoom(fresh.data);
+  showRoomBadge(fresh.data.bill.room_code);
   hideLobby();
-  toast(t.lobbyJoinedRoom.replace('{code}', data.bill.room_code));
+  toast(t.lobbyJoinedRoom.replace('{code}', fresh.data.bill.room_code));
 }
 
 function useOffline() {
   hideLobby();
+}
+
+// Turn a join_room-shaped snapshot {bill, diners, menu_items, events} into the
+// same {settings, tally} shape the offline app already uses, so every existing
+// render/calc function (computeBillBreakdown, renderTally, renderStickyNav...)
+// runs unchanged on synced data.
+function enterRoom(snap) {
+  isOnline = true;
+  menuItemIdByDishKey = {};
+  dishKeyByMenuItemId = {};
+
+  settings.standard = [];
+  settings.seasonal = [];
+  (snap.menu_items || []).filter(m => m.is_active).forEach(m => {
+    menuItemIdByDishKey[m.dish_key] = m.id;
+    dishKeyByMenuItemId[m.id] = m.dish_key;
+    const dish = { id: m.dish_key, name: m.name, price: Number(m.price) };
+    if (m.kind === 'seasonal') {
+      dish.seasonal = true;
+      settings.seasonal.push(dish);
+    } else {
+      const def = DEFAULT_BY_ID[m.dish_key]; // restore icon/color for the 6 known default plates
+      if (def) { dish.kind = def.kind; dish.color = def.color; dish.sushi = def.sushi; }
+      settings.standard.push(dish);
+    }
+  });
+
+  settings.serviceCharge = !!snap.bill.service_charge;
+  settings.rounding      = !!snap.bill.rounding;
+  settings.discount = {
+    enabled: !!snap.bill.discount_enabled,
+    type:    snap.bill.discount_type || 'pct',
+    amount:  Number(snap.bill.discount_amount || 0)
+  };
+
+  // fold the append-only tap log into per-diner, per-dish quantities
+  const countsByDiner = {};
+  (snap.diners || []).forEach(d => countsByDiner[d.id] = {});
+  (snap.events || []).forEach(ev => {
+    const dishKey = dishKeyByMenuItemId[ev.menu_item_id];
+    const bucket = countsByDiner[ev.diner_id];
+    if (!dishKey || !bucket) return;
+    bucket[dishKey] = (bucket[dishKey] || 0) + Number(ev.delta);
+  });
+  Object.values(countsByDiner).forEach(counts => {
+    Object.keys(counts).forEach(k => { if (counts[k] <= 0) delete counts[k]; });
+  });
+
+  tally.people = (snap.diners || []).map(d => ({
+    id: d.id, name: d.name || '', counts: countsByDiner[d.id] || {}
+  }));
+  if (tally.people.length === 0) tally.people = [{ id: null, name: '', counts: {} }];
+
+  renderSettings();
+  renderTally();
 }
 
 /* ── actions ── */
