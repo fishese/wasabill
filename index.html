@@ -577,7 +577,8 @@ const i18n = {
     onlineTapFailed:"Couldn't save that tap — check your connection",
     connectionLost:'⚠️ Reconnecting — tallying paused',
     connectionRestored:'Back online — synced up',
-    onlineTapPausedMsg:"Reconnecting — can't tally right now"
+    onlineTapPausedMsg:"Reconnecting — can't tally right now",
+    onlineSaveFailed:"That change wasn't saved — check your connection"
   },
   zh: {
     title:'壽司分帳機', headerTitle:'🍣 數碟郎 — 迴轉壽司分帳機',
@@ -625,7 +626,8 @@ const i18n = {
     onlineTapFailed:'呢個動作未儲到，請檢查網絡',
     connectionLost:'⚠️ 重新連接中 — 已暫停計帳',
     connectionRestored:'已重新連線，資料已更新',
-    onlineTapPausedMsg:'重新連接中，未能計帳'
+    onlineTapPausedMsg:'重新連接中，未能計帳',
+    onlineSaveFailed:'嗰個改動未儲到，請檢查網絡'
   }
 };
 
@@ -902,30 +904,60 @@ function computeBillBreakdown() {
 /* ── render tally ── */
 function renderPeopleCount() {
   document.getElementById('peopleNum').textContent  = tally.people.length;
-  const lockTitle = isOnline ? i18n[currentLang].onlineEditLockedTitle : '';
 
+  // Adding/removing/renaming people now syncs (see setPeople/changeDishCount);
+  // only "clear bill" stays locked online -- it has no synced equivalent yet.
   const minusBtn = document.getElementById('peopleMinus');
-  minusBtn.disabled = tally.people.length <= 1 || isOnline;
-  minusBtn.title     = lockTitle;
+  minusBtn.disabled = tally.people.length <= 1;
+  minusBtn.title     = '';
 
   const plusBtn = document.getElementById('peoplePlus');
-  plusBtn.disabled = tally.people.length >= MAX_PEOPLE || isOnline;
-  plusBtn.title    = isOnline ? lockTitle : (tally.people.length >= MAX_PEOPLE ? i18n[currentLang].maxPeopleMsg : '');
+  plusBtn.disabled = tally.people.length >= MAX_PEOPLE;
+  plusBtn.title    = tally.people.length >= MAX_PEOPLE ? i18n[currentLang].maxPeopleMsg : '';
 
   const newBillBtn = document.getElementById('newBill');
   newBillBtn.disabled = isOnline;
-  newBillBtn.title    = lockTitle;
+  newBillBtn.title    = isOnline ? i18n[currentLang].onlineEditLockedTitle : '';
 }
 
 function setPeople(delta) {
-  if (isOnline) return;
   const n = tally.people.length + delta;
   if (n < 1 || n > MAX_PEOPLE) return;
+  const t = i18n[currentLang];
+
+  if (isOnline) {
+    const room = getRoom();
+    if (!room) return;
+
+    if (delta > 0) {
+      supabaseClient.rpc('add_diner', { p_bill: room.bill_id, p_name: '' }).then(({ data: newId, error }) => {
+        if (error || !newId) { console.error('add_diner failed:', error); toast(t.onlineSaveFailed); return; }
+        if (!tally.people.some(p => p.id === newId)) { // guard against the realtime echo racing us here
+          tally.people.push({ id: newId, name: '', counts: {} });
+          renderTally();
+        }
+      });
+    } else {
+      const last = tally.people[tally.people.length - 1];
+      if (Object.keys(last.counts).length > 0) {
+        const name = last.name || (t.personDefault + tally.people.length);
+        if (!confirm(t.confirmRemovePerson.replace('{name}', name))) return;
+      }
+      supabaseClient.rpc('remove_diner', { p_bill: room.bill_id, p_diner: last.id }).then(({ error }) => {
+        if (error) { console.error('remove_diner failed:', error); toast(t.onlineSaveFailed); }
+      });
+      tally.people = tally.people.slice(0, n);
+      renderTally();
+    }
+    return;
+  }
+
+  // ── offline (unchanged) ──
   if (delta < 0) {
     const last = tally.people[tally.people.length - 1];
     if (Object.keys(last.counts).length > 0) {
-      const name = last.name || (i18n[currentLang].personDefault + tally.people.length);
-      if (!confirm(i18n[currentLang].confirmRemovePerson.replace('{name}', name))) return;
+      const name = last.name || (t.personDefault + tally.people.length);
+      if (!confirm(t.confirmRemovePerson.replace('{name}', name))) return;
     }
   }
   if (delta > 0) for (let i = 0; i < delta; i++) tally.people.push({name:'', counts:{}});
@@ -1090,10 +1122,18 @@ function renderTally() {
     const inp = document.createElement('input');
     inp.placeholder = i18n[currentLang].personDefault + (idx + 1);
     inp.value   = p.name;
-    inp.disabled = isOnline;
-    inp.title    = isOnline ? i18n[currentLang].onlineEditLockedTitle : '';
     inp.onfocus = () => inp.select();
     inp.oninput = () => { p.name = inp.value; saveTally(); renderStickyNav(computeBillBreakdown()); };
+    if (isOnline) {
+      // local update is instant (above); the network write only fires on blur,
+      // per the plan's "send on blur, not per keystroke" rule for synced fields
+      inp.onblur = () => {
+        const room = getRoom();
+        if (!room || !p.id) return;
+        supabaseClient.rpc('rename_diner', { p_bill: room.bill_id, p_diner: p.id, p_name: p.name })
+          .then(({ error }) => { if (error) { console.error('rename_diner failed:', error); toast(i18n[currentLang].onlineSaveFailed); } });
+      };
+    }
 
     const tot = document.createElement('div'); tot.className = 'ptotal'; tot.id = 'ptot' + idx;
     head.append(av, inp, tot); card.appendChild(head);
@@ -1433,6 +1473,10 @@ function subscribeToRoom(billId) {
         payload => applyRemoteEvent(payload.new))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
         payload => applyRemoteDiner(payload.new))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
+        payload => applyRemoteDinerRename(payload.new))
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
+        payload => applyRemoteDinerRemoval(payload.old))
     .subscribe((status) => {
       const wasConnected = channelConnected;
       channelConnected = (status === 'SUBSCRIBED');
@@ -1476,6 +1520,25 @@ function applyRemoteEvent(ev) {
 function applyRemoteDiner(diner) {
   if (tally.people.some(p => p.id === diner.id)) return; // it's us, or already known
   tally.people.push({ id: diner.id, name: diner.name || '', counts: {} });
+  renderTally();
+}
+
+// Someone (possibly us, echoed back) renamed a diner -- naturally idempotent,
+// since setting the same name twice is harmless, so no dedup bookkeeping needed.
+function applyRemoteDinerRename(diner) {
+  const person = tally.people.find(p => p.id === diner.id);
+  if (!person || person.name === (diner.name || '')) return;
+  person.name = diner.name || '';
+  renderTally();
+}
+
+// Someone (possibly us, echoed back) removed a diner -- also naturally
+// idempotent, since removing an already-gone id is a no-op below.
+function applyRemoteDinerRemoval(diner) {
+  const idx = tally.people.findIndex(p => p.id === diner.id);
+  if (idx === -1) return;
+  tally.people.splice(idx, 1);
+  if (tally.people.length === 0) tally.people.push({ id: null, name: '', counts: {} });
   renderTally();
 }
 
