@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>數碟郎 — 迴轉壽司分帳機</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#D84A46">
+<link rel="icon" href="./sushiicon.svg" type="image/svg+xml">
 <style>
   :root{
     --bg: #F9F6F0;
@@ -2071,6 +2074,16 @@ updateStaticLabels();
 renderSettings();
 renderTally();
 showForkBadge(); // shows the "OFFLINE COPY" badge if this device previously forked out of a room
+
+// PWA: makes "install as an app" / offline-cached launch work. The manifest
+// link + this registration are the two pieces that were missing -- sw.js
+// and manifest.json already existed but nothing in the page ever wired them
+// up. Registered after load so it can't compete with first paint.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => console.error('Service worker registration failed:', err));
+  });
+}
 </script>
 </body>
 </html>
