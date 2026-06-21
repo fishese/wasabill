@@ -33,13 +33,34 @@
   /* ── header (COMPACT) ── */
   .header-top {
     background: linear-gradient(135deg, #E86A66 0%, #D84A46 100%);
-    color: #fff; padding: 8px 16px 4px;
+    color: #fff; padding: 8px 16px 6px;
   }
   .header-top h1 {
-    margin: 0 auto; font-size: 17px; font-weight: 700; letter-spacing: .3px;
-    max-width: 760px; display: flex; align-items: center; gap: 8px;
+    margin: 0 auto 6px; font-size: 17px; font-weight: 700; letter-spacing: .3px;
+    max-width: 760px; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 6px;
   }
-  
+  .header-tagline { font-size: 11px; font-weight: 500; letter-spacing: 0; opacity: 0.9; }
+  .header-controls {
+    display: flex; align-items: center;
+    max-width: 760px; margin: 0 auto; gap: 8px; flex-wrap: wrap;
+  }
+  .header-controls-left, .header-controls-right {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  }
+  .header-controls-right { margin-left: auto; }
+  .header-btn {
+    border: none; font-size: 11px; font-weight: 700; padding: 4px 10px;
+    border-radius: 20px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .share-btn { background: rgba(255,255,255,0.25); color: #fff; }
+  .share-btn svg { width: 12px; height: 12px; fill: currentColor; flex-shrink: 0; }
+  /* deliberately louder/darker than the share pill -- these two are one-way actions */
+  .danger-btn { background: #F5A623; color: #5A3300; }
+  .danger-btn-outline {
+    background: rgba(0,0,0,0.15); color: #FFE0AD; border: 1.5px solid #F5A623;
+    padding: 2.5px 8.5px;
+  }
+
   .sticky-tabs {
     position: sticky; top: 0; z-index: 20;
     background: #D84A46;
@@ -460,11 +481,17 @@
 
 <div class="header-top">
   <h1 id="lblHeaderTitle">🍣 數碟郎 — 迴轉壽司分帳機</h1>
-  <div id="roomBadge" class="room-badge" style="display:none;"></div>
-  <div id="notJoinedBadge" class="room-badge" style="display:none; background:rgba(245,166,35,0.35);"></div>
-  <button id="shareRoomBtn" style="display:none; background:rgba(255,255,255,0.25); border:none; color:#fff; font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px; cursor:pointer; margin-top:4px;"></button>
-  <button id="closeRoomBtn" style="display:none; background:rgba(255,255,255,0.25); border:none; color:#fff; font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px; cursor:pointer; margin-top:4px;"></button>
-  <button id="goOfflineLink" style="display:none; background:none; border:none; color:rgba(255,255,255,0.85); font-size:11px; text-decoration:underline; cursor:pointer; padding:2px 0; margin-top:2px;"></button>
+  <div class="header-controls">
+    <div class="header-controls-left">
+      <div id="roomBadge" class="room-badge" style="display:none;"></div>
+      <button id="shareRoomBtn" class="header-btn share-btn" style="display:none;"></button>
+      <div id="notJoinedBadge" class="room-badge" style="display:none; background:rgba(245,166,35,0.35);"></div>
+    </div>
+    <div class="header-controls-right">
+      <button id="goOfflineLink" class="header-btn danger-btn-outline" style="display:none;"></button>
+      <button id="closeRoomBtn" class="header-btn danger-btn" style="display:none;"></button>
+    </div>
+  </div>
 </div>
 
 <div id="shareOverlay" class="lobby-overlay hidden">
@@ -629,6 +656,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js"></script>
 <script>
+// Material/Android "share" glyph (three connected nodes) -- matches what
+// users expect on Android instead of the iOS-style "box with up-arrow".
+const SHARE_ICON_SVG = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>';
+
 /* ── multiplayer: connect to the shared room database (Supabase) ── */
 const SUPABASE_URL = 'https://zhxjaivcthosqzzfbvqh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_j18fuWpO4nkHk3zckOJzWg_NgO0LbOb';
@@ -651,7 +682,7 @@ const DEFAULT_STANDARD = [
 
 const i18n = {
   en: {
-    title:'Kaiten Sushi Bill Splitter', headerTitle:'🍣 Kaiten Sushi — Bill Splitter',
+    title:'Wasabill - The Kaiten Sushi Calculator', headerTitle:'🍣 Wasabill', headerTagline:'- The Kaiten Sushi Calculator',
     tabTally:'Tally', tabSettings:'Settings',
     whosEating:"Who's eating?", people:'People:',
     newBill:'New bill', copyBill:'Copy bill',
@@ -684,7 +715,7 @@ const i18n = {
     seasonalDefaultName:'Seasonal', delTitle:'Remove', seasonalBadge:'seasonal',
     copiedToast:'Copied to clipboard!', langBtn:'中',
     plates: ' plates', totalPlates: 'Total plates', maxPeopleMsg:'Maximum 8 people',
-    lobbyTitle:'🍣 Kaiten Sushi', lobbySub:'Split the bill together, live',
+    lobbyTitle:'🍣 Wasabill', lobbySub:'Split the bill together, live',
     lobbyStartBtn:'Start New Bill', lobbyOr:'or', lobbyCodePlaceholder:'Room code, e.g. tea-red',
     lobbyJoinBtn:'Join', lobbyOfflineBtn:'Use offline (no sync)',
     lobbyEnterName:"What's your name?",
@@ -943,7 +974,9 @@ function updateStaticLabels() {
   const t = i18n[currentLang];
   document.documentElement.lang = currentLang === 'zh' ? 'zh-Hant' : 'en';
   document.title = t.title;
-  document.getElementById('lblHeaderTitle').textContent     = t.headerTitle;
+  document.getElementById('lblHeaderTitle').innerHTML        = t.headerTagline
+    ? `<span>${t.headerTitle}</span><span class="header-tagline">${t.headerTagline}</span>`
+    : t.headerTitle;
   document.getElementById('lblTabTally').textContent        = t.tabTally;
   document.getElementById('lblTabSettings').textContent     = t.tabSettings;
   document.getElementById('lblWhosEating').textContent      = t.whosEating;
@@ -1668,14 +1701,14 @@ function showRoomBadge(roomCode) {
   badge.textContent = '🔗 ' + roomCode;
   badge.style.display = 'inline-flex';
   const link = document.getElementById('goOfflineLink');
-  link.textContent = i18n[currentLang].goOfflineLinkLabel;
-  link.style.display = 'block';
+  link.textContent = '✈️ ' + i18n[currentLang].goOfflineLinkLabel;
+  link.style.display = 'inline-flex';
   const shareBtn = document.getElementById('shareRoomBtn');
-  shareBtn.textContent = '📤 ' + i18n[currentLang].shareBtn;
-  shareBtn.style.display = 'block';
+  shareBtn.innerHTML = SHARE_ICON_SVG + i18n[currentLang].shareBtn;
+  shareBtn.style.display = 'inline-flex';
   const closeBtn = document.getElementById('closeRoomBtn');
   closeBtn.textContent = '🔒 ' + i18n[currentLang].closeRoomBtnLabel;
-  closeBtn.style.display = 'block';
+  closeBtn.style.display = 'inline-flex';
 }
 
 // Builds the shareable join link for the room currently in the address bar's

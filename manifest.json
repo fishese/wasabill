@@ -1,8 +1,8 @@
 {
   "id": "sushi-split",
-  "name": "數碟郎 sushi split",
-  "short_name": "sushi split",
-  "description": "數碟郎 — 迴轉壽司分帳機 — Kaiten sushi bill splitter",
+  "name": "數碟郎 Wasabill",
+  "short_name": "Wasabill",
+  "description": "數碟郎 — 迴轉壽司分帳機 — Wasabill, the Kaiten sushi calculator",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
