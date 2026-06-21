@@ -1,26 +1,32 @@
-const CACHE = 'sushi-split-v5';
+const CACHE = 'sushi-split-v6';
 const ASSETS = [
   './index.html',
   './manifest.json',
   './sushiicon.svg'
 ];
-// Without this being cached *somehow*, opening the installed app with zero
+// Without these being cached *somehow*, opening the installed app with zero
 // connectivity would crash before rendering anything: the page's own script
 // calls window.supabase.createClient(...) as its very first statement, which
-// throws if this script never loaded.
-const CDN_SCRIPT = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+// throws if that library never loaded. The QR library isn't load-bearing the
+// same way (it's only touched when the Share popup opens), but caching it
+// too means sharing a room still works even if you're offline at the table.
+const CDN_SCRIPTS = [
+  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+  'https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js'
+];
 const RUNTIME_CACHE_HOSTS = ['cdn.jsdelivr.net'];
 
 // Core assets are cached atomically (install fails if any of THESE fail --
-// correct, they're essential). The CDN script is attempted separately and
+// correct, they're essential). Each CDN script is attempted separately and
 // independently: a CDN hiccup at install time shouldn't be able to fail the
-// whole install. If it does fail here, the fetch handler's opportunistic
-// GET-caching below picks it up on the next successful online load instead.
+// whole install, and one script failing shouldn't block another. Anything
+// that fails here gets picked up opportunistically by the fetch handler's
+// GET-caching on the next successful online load instead.
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(async c => {
       await c.addAll(ASSETS);
-      try { await c.add(CDN_SCRIPT); } catch (err) { /* picked up opportunistically later */ }
+      await Promise.all(CDN_SCRIPTS.map(url => c.add(url).catch(() => {})));
     })
   );
   self.skipWaiting();

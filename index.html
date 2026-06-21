@@ -385,7 +385,20 @@
   <h1 id="lblHeaderTitle">🍣 數碟郎 — 迴轉壽司分帳機</h1>
   <div id="roomBadge" class="room-badge" style="display:none;"></div>
   <div id="notJoinedBadge" class="room-badge" style="display:none; background:rgba(245,166,35,0.35);"></div>
+  <button id="shareRoomBtn" style="display:none; background:rgba(255,255,255,0.25); border:none; color:#fff; font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px; cursor:pointer; margin-top:4px;"></button>
   <button id="goOfflineLink" style="display:none; background:none; border:none; color:rgba(255,255,255,0.85); font-size:11px; text-decoration:underline; cursor:pointer; padding:2px 0; margin-top:2px;"></button>
+</div>
+
+<div id="shareOverlay" class="lobby-overlay hidden">
+  <div class="lobby-card">
+    <h1 id="lblShareTitle" style="margin:0 0 14px; font-size:18px;"></h1>
+    <canvas id="shareQrCanvas" width="220" height="220" style="display:block; margin:0 auto 10px; border-radius:12px;"></canvas>
+    <p class="muted" id="lblShareQrCaption" style="text-align:center; margin:0 0 14px; font-size:12px;"></p>
+    <input class="text" id="shareLinkInput" readonly style="margin-bottom:10px; text-align:center; font-size:13px;">
+    <button class="btn primary" id="shareCopyBtn" style="width:100%; margin-bottom:8px;"></button>
+    <button class="btn ghost" id="shareNativeBtn" style="width:100%; margin-bottom:8px; display:none;"></button>
+    <button class="btn ghost" id="shareCloseBtn" style="width:100%;"></button>
+  </div>
 </div>
 
 <div class="sticky-tabs">
@@ -535,6 +548,7 @@
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js"></script>
 <script>
 /* ── multiplayer: connect to the shared room database (Supabase) ── */
 const SUPABASE_URL = 'https://zhxjaivcthosqzzfbvqh.supabase.co';
@@ -616,7 +630,11 @@ const i18n = {
     forkedOfflineMsg:'Switched to an offline copy',
     offlineCopyLabel:'OFFLINE COPY', goOfflineLinkLabel:'Go offline instead',
     presencePresentTitle:'Present', presenceAwayTitle:'Joined, currently away',
-    presenceClaimTitle:'Tap if this is you', notJoinedLabel:'not joined'
+    presenceClaimTitle:'Tap if this is you', notJoinedLabel:'not joined',
+    shareBtn:'Share', shareModalTitle:'Invite to this room',
+    shareQrCaption:'Or scan to join', copyLinkBtn:'Copy link',
+    nativeShareBtn:'Share...', closeBtn:'Close',
+    shareInviteText:'Join my Kaiten Sushi bill: {code}'
   },
   zh: {
     title:'壽司分帳機', headerTitle:'🍣 數碟郎 — 迴轉壽司分帳機',
@@ -677,7 +695,11 @@ const i18n = {
     forkedOfflineMsg:'已轉做離線副本',
     offlineCopyLabel:'離線副本', goOfflineLinkLabel:'轉做離線模式',
     presencePresentTitle:'已連線', presenceAwayTitle:'已加入，暫時離開',
-    presenceClaimTitle:'如果係你，撳呢個', notJoinedLabel:'未加入'
+    presenceClaimTitle:'如果係你，撳呢個', notJoinedLabel:'未加入',
+    shareBtn:'分享', shareModalTitle:'邀請加入呢個房間',
+    shareQrCaption:'或者掃描加入', copyLinkBtn:'複製連結',
+    nativeShareBtn:'分享...', closeBtn:'關閉',
+    shareInviteText:'嚟同我一齊計數碟郎帳單：{code}'
   }
 };
 
@@ -783,6 +805,11 @@ function updateStaticLabels() {
   document.getElementById('lblTabHistory').textContent       = t.tabHistory;
   document.getElementById('lblHistoryTitle').textContent     = t.historyTitle;
   document.getElementById('lblHistoryMuted').textContent     = t.historyMuted;
+  document.getElementById('lblShareTitle').textContent       = t.shareModalTitle;
+  document.getElementById('lblShareQrCaption').textContent   = t.shareQrCaption;
+  document.getElementById('shareCopyBtn').textContent        = t.copyLinkBtn;
+  document.getElementById('shareNativeBtn').textContent      = t.nativeShareBtn;
+  document.getElementById('shareCloseBtn').textContent       = t.closeBtn;
   document.getElementById('seasName').placeholder           = t.seasNamePlaceholder;
   document.getElementById('addSeas').textContent            = t.addBtn;
   document.getElementById('resetPrices').textContent        = t.resetPricesBtn;
@@ -1446,6 +1473,39 @@ function showRoomBadge(roomCode) {
   const link = document.getElementById('goOfflineLink');
   link.textContent = i18n[currentLang].goOfflineLinkLabel;
   link.style.display = 'block';
+  const shareBtn = document.getElementById('shareRoomBtn');
+  shareBtn.textContent = '📤 ' + i18n[currentLang].shareBtn;
+  shareBtn.style.display = 'block';
+}
+
+// Builds the shareable join link for the room currently in the address bar's
+// origin -- works correctly whether this is the live site or a local test.
+function getShareUrl(roomCode) {
+  return `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+}
+
+function openShareModal() {
+  const room = getRoom();
+  if (!room) return;
+  const url = getShareUrl(room.room_code);
+
+  document.getElementById('shareLinkInput').value = url;
+  document.getElementById('shareOverlay').classList.remove('hidden');
+  document.getElementById('shareNativeBtn').style.display = navigator.share ? 'block' : 'none';
+
+  const canvas = document.getElementById('shareQrCanvas');
+  if (window.QRCode) {
+    canvas.style.display = 'block';
+    QRCode.toCanvas(canvas, url, { width: 220, margin: 1 }, err => {
+      if (err) { console.error('QR render failed:', err); canvas.style.display = 'none'; }
+    });
+  } else {
+    canvas.style.display = 'none'; // library failed to load (e.g. fully offline, never cached yet) -- link/copy still work
+  }
+}
+
+function closeShareModal() {
+  document.getElementById('shareOverlay').classList.add('hidden');
 }
 
 // "Fork" (plan §IV.1, option 2): freeze the current room state into a
@@ -1468,6 +1528,8 @@ function goOfflineFork() {
   saveTally();    // OFFLINE localStorage keys, now that isOnline is false
 
   document.getElementById('goOfflineLink').style.display = 'none';
+  document.getElementById('shareRoomBtn').style.display = 'none';
+  closeShareModal();
   updateConnectionUI();
   showForkBadge();
   renderSettings();
@@ -2069,6 +2131,30 @@ document.getElementById('lobbyCodeInput').addEventListener('keydown', e => { if 
 document.getElementById('goOfflineLink').onclick     = goOfflineFork;
 document.getElementById('bannerGoOfflineBtn').onclick = goOfflineFork;
 
+document.getElementById('shareRoomBtn').onclick   = openShareModal;
+document.getElementById('shareCloseBtn').onclick  = closeShareModal;
+document.getElementById('shareLinkInput').onfocus = e => e.target.select();
+document.getElementById('shareCopyBtn').onclick   = () => {
+  const t = i18n[currentLang];
+  const url = document.getElementById('shareLinkInput').value;
+  navigator.clipboard.writeText(url).then(() => toast(t.copiedToast)).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta); toast(t.copiedToast);
+  });
+};
+document.getElementById('shareNativeBtn').onclick = () => {
+  const room = getRoom();
+  const t = i18n[currentLang];
+  if (!room || !navigator.share) return;
+  navigator.share({
+    title: i18n[currentLang].lobbyTitle,
+    text: t.shareInviteText.replace('{code}', room.room_code),
+    url: document.getElementById('shareLinkInput').value
+  }).catch(() => {}); // user cancelled the share sheet -- not an error
+};
+
 /* ── init ── */
 updateStaticLabels();
 renderSettings();
@@ -2084,6 +2170,19 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(err => console.error('Service worker registration failed:', err));
   });
 }
+
+// Auto-join via a shared link (?room=code): skips the manual "type the
+// code" step entirely. Strip the param from the URL bar immediately (before
+// the join even resolves) so a later reload of this same tab -- e.g. one of
+// the app's own programmatic reloads after closing a bill -- doesn't
+// silently re-trigger the join prompt.
+(function joinFromSharedLink() {
+  const roomFromLink = new URLSearchParams(window.location.search).get('room');
+  if (!roomFromLink) return;
+  history.replaceState(null, '', window.location.pathname);
+  document.getElementById('lobbyCodeInput').value = roomFromLink;
+  joinRoomByCode();
+})();
 </script>
 </body>
 </html>
