@@ -779,7 +779,20 @@ function sortMenuArrays() {
     if (bi === -1) return -1;
     return ai - bi;
   });
-  settings.seasonal.sort((a, b) => a.name.localeCompare(b.name));
+  // Sorted by creation order, NOT alphabetically by name. localeCompare's
+  // result for CJK text depends on the browser's locale/collation, which
+  // isn't guaranteed identical across devices -- exactly the kind of
+  // inconsistency this whole function exists to prevent. createdAt (an ISO
+  // timestamp string, safe to compare lexicographically) has no such
+  // ambiguity. dish_key is plain ASCII (always machine-generated, e.g.
+  // "seas_1718901234567"), so it's a safe, fully deterministic tiebreak for
+  // the rare case of two adds landing in the same millisecond -- which one
+  // wins that tiebreak doesn't matter, only that every device agrees.
+  settings.seasonal.sort((a, b) => {
+    const at = a.createdAt || '', bt = b.createdAt || '';
+    if (at !== bt) return at < bt ? -1 : 1;
+    return (a.id || '').localeCompare(b.id || '');
+  });
 }
 
 // "Pin myself to top" is a purely local, per-device display preference --
@@ -1744,7 +1757,7 @@ function applySnapshot(snap) {
   (snap.menu_items || []).filter(m => m.is_active).forEach(m => {
     menuItemIdByDishKey[m.dish_key] = m.id;
     dishKeyByMenuItemId[m.id] = m.dish_key;
-    const dish = { id: m.dish_key, name: m.name, price: Number(m.price) };
+    const dish = { id: m.dish_key, name: m.name, price: Number(m.price), createdAt: m.created_at };
     if (m.kind === 'seasonal') {
       dish.seasonal = true;
       settings.seasonal.push(dish);
@@ -1963,7 +1976,7 @@ function applyRemoteMenuItemUpsert(item) {
 
   menuItemIdByDishKey[item.dish_key] = item.id;
   dishKeyByMenuItemId[item.id] = item.dish_key;
-  const dish = { id: item.dish_key, name: item.name, price: Number(item.price) };
+  const dish = { id: item.dish_key, name: item.name, price: Number(item.price), createdAt: item.created_at };
   if (item.kind === 'seasonal') {
     dish.seasonal = true;
     settings.seasonal.push(dish);
@@ -2130,7 +2143,7 @@ async function addSeasonal() {
     dishKeyByMenuItemId[itemId] = dishKey;
   }
 
-  settings.seasonal.push({ id: dishKey, name, price, seasonal: true });
+  settings.seasonal.push({ id: dishKey, name, price, seasonal: true, createdAt: new Date().toISOString() });
   if (isOnline) sortMenuArrays();
   document.getElementById('seasName').value  = '';
   document.getElementById('seasPrice').value = '';
