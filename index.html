@@ -321,6 +321,14 @@
   .btn.ghost:hover{background:rgba(0,0,0,0.08)}
   .btn.ghost:active{background:rgba(0,0,0,0.12); transform:scale(.96)}
   .btn.sm{padding:8px 14px; font-size:13px; border-radius: 12px;}
+  .btn:disabled{cursor:not-allowed; opacity:.62; transform:none!important; box-shadow:none}
+  .btn.is-loading{cursor:wait; opacity:1}
+  .btn-spinner{
+    width:15px; height:15px; margin-right:8px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.45); border-top-color:#fff;
+    animation:buttonSpin .75s linear infinite; flex-shrink:0;
+  }
+  @keyframes buttonSpin{to{transform:rotate(360deg)}}
   .del{background:var(--bg); border:none; color:var(--accent); font-size:22px; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor:pointer; transition: .2s;}
   .del:hover { background: #FFF8F7; transform: scale(1.05); }
   .addrow{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; align-items:center; background: rgba(0,0,0,0.02); padding: 12px; border-radius: 20px;}
@@ -389,7 +397,27 @@
   .chip-remove{ background:none; border:none; color:var(--muted); font-size:17px; cursor:pointer; line-height:1; padding:0 2px; flex-shrink:0; }
   .panel-add-row{ display:flex; gap:8px; margin-bottom:10px; }
   .panel-add-row .text{ flex:1; min-width:0; }
-  .panel-pick-btn{ width:100%; text-align:left; margin-bottom:6px; }
+  .claimable-callout{
+    background:rgba(95,143,117,.10); border:1px solid rgba(95,143,117,.28);
+    border-radius:16px; padding:10px 11px;
+  }
+  .claimable-heading{display:flex; align-items:flex-start; gap:8px; margin-bottom:8px}
+  .claimable-icon{
+    width:26px; height:26px; display:flex; align-items:center; justify-content:center;
+    border-radius:9px; background:rgba(95,143,117,.18); flex-shrink:0; font-size:14px;
+  }
+  .claimable-title{font-size:13px; line-height:1.25; font-weight:800; color:var(--ink)}
+  .claimable-hint{font-size:11px; line-height:1.3; color:var(--muted); margin-top:2px}
+  #joinPanelPickList{display:flex; flex-wrap:wrap; gap:6px}
+  .panel-pick-btn{
+    width:auto; max-width:100%; margin:0; text-align:left; background:#fff!important;
+    color:#3F7058!important; border:1px solid rgba(95,143,117,.45)!important;
+    box-shadow:0 2px 5px rgba(95,143,117,.08);
+  }
+  .panel-pick-btn:hover,.panel-pick-btn:focus-visible{
+    background:#F5FBF7!important; border-color:var(--accent2)!important;
+    box-shadow:0 0 0 3px rgba(95,143,117,.14); outline:none;
+  }
   .room-badge{
     display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700;
     background:rgba(255,255,255,0.2); color:#fff; padding:4px 10px; border-radius:20px;
@@ -452,7 +480,7 @@
       </div>
     </div>
 
-    <button class="btn primary" id="createPanelSubmitBtn" style="width:100%; margin-top:10px;"></button>
+    <button class="btn primary" id="createPanelSubmitBtn" aria-live="polite" style="width:100%; margin-top:10px;"></button>
     <button class="btn ghost" id="createPanelCancelBtn" style="width:100%; margin-top:8px;"></button>
   </div>
 </div>
@@ -462,8 +490,16 @@
     <h1 id="lblJoinPanelTitle" style="margin:0 0 14px; font-size:18px; text-align:center;"></h1>
 
     <div class="panel-section" id="joinPanelPickSection" style="margin-top:0;">
-      <div class="panel-section-title" id="lblJoinPanelPickTitle"></div>
-      <div id="joinPanelPickList"></div>
+      <div class="claimable-callout">
+        <div class="claimable-heading">
+          <span class="claimable-icon" aria-hidden="true">👋</span>
+          <div>
+            <div class="claimable-title" id="lblJoinPanelPickTitle"></div>
+            <div class="claimable-hint" id="lblJoinPanelPickHint"></div>
+          </div>
+        </div>
+        <div id="joinPanelPickList"></div>
+      </div>
       <div class="lobby-divider" id="lblJoinPanelOr"></div>
     </div>
 
@@ -752,8 +788,9 @@ const i18n = {
     createPanelDinersTitle:'Other diners (optional)', createDinerPlaceholder:'Diner name',
     createPanelAddBtn:'Add',
     createPanelSeasonalTitle:'Seasonal dishes (optional)',
-    createPanelSubmitBtn:'Create Room', createPanelCancelBtn:'Cancel',
-    joinPanelTitle:'Join this room', joinPanelPickTitle:'Are you one of these?',
+    createPanelSubmitBtn:'Create Room', createPanelLoading:'Creating room…', createPanelCancelBtn:'Cancel',
+    joinPanelTitle:'Join this room', joinPanelPickTitle:'Your name may already be here',
+    joinPanelPickHint:'Pick it below to rejoin without adding a duplicate.',
     joinPanelOr:'or enter your name', joinNamePlaceholder:"What's your name?",
     joinPanelSubmitBtn:'Join', joinPanelCancelBtn:'Cancel'
   },
@@ -828,8 +865,9 @@ const i18n = {
     createPanelDinersTitle:'其他用餐者（可選）', createDinerPlaceholder:'用餐者名稱',
     createPanelAddBtn:'新增',
     createPanelSeasonalTitle:'季節限定（可選）',
-    createPanelSubmitBtn:'建立房間', createPanelCancelBtn:'取消',
-    joinPanelTitle:'加入呢個房間', joinPanelPickTitle:'你係唔係呢度其中一位？',
+    createPanelSubmitBtn:'建立房間', createPanelLoading:'建立房間中…', createPanelCancelBtn:'取消',
+    joinPanelTitle:'加入呢個房間', joinPanelPickTitle:'可能已經有你個名',
+    joinPanelPickHint:'見到自己個名就直接撳，唔使再新增一位。',
     joinPanelOr:'或者輸入你嘅名', joinNamePlaceholder:'你叫咩名？',
     joinPanelSubmitBtn:'加入', joinPanelCancelBtn:'取消'
   }
@@ -1029,6 +1067,7 @@ function updateStaticLabels() {
   document.getElementById('createPanelCancelBtn').textContent     = t.createPanelCancelBtn;
   document.getElementById('lblJoinPanelTitle').textContent        = t.joinPanelTitle;
   document.getElementById('lblJoinPanelPickTitle').textContent    = t.joinPanelPickTitle;
+  document.getElementById('lblJoinPanelPickHint').textContent     = t.joinPanelPickHint;
   document.getElementById('lblJoinPanelOr').textContent           = t.joinPanelOr;
   document.getElementById('joinName').placeholder                 = t.joinNamePlaceholder;
   document.getElementById('joinPanelSubmitBtn').textContent       = t.joinPanelSubmitBtn;
@@ -1282,6 +1321,19 @@ function changeDishCount(pIndex, d, delta) {
   const applyAll = applyAllToggle.checked;
   const t = i18n[currentLang];
 
+  // Never send a negative event for an already-empty counter. Offline this
+  // was visually harmless because the local value is clamped to zero, but in
+  // a shared room the append-only event log retained that hidden -1. The next
+  // + tap then merely cancelled the bad event and disappeared after a reload.
+  const targetPerson = tally.people[pIndex];
+  if (delta < 0 && (!targetPerson || (targetPerson.counts[d.id] || 0) <= 0)) {
+    if (applyAll) {
+      applyAllToggle.checked = false;
+      toast(t.toastRemoveOne);
+    }
+    return;
+  }
+
   if (isOnline) {
     const room = getRoom();
     const itemId = menuItemIdByDishKey[d.id];
@@ -1496,6 +1548,7 @@ function renderTally() {
       const refresh = () => {
         const q = p.counts[d.id] || 0;
         qty.textContent = q; qty.className = 'qty' + (q ? ' has' : '');
+        minus.disabled = q <= 0;
         cell.classList.toggle('active', !!q);
         badge.textContent = q; badge.style.display = q ? 'flex' : 'none';
       };
@@ -1570,6 +1623,7 @@ function renderSettings() {
     inp.onchange = () => {
       const v = parseFloat(inp.value);
       d.price = (isNaN(v) || v < 0) ? 0 : v;
+      inp.value = d.price;
       saveSettings(); renderTally();
       if (d.kind === 'discount') renderSettings();
       toast(i18n[currentLang].msgPriceUpdated);
@@ -1596,6 +1650,7 @@ function renderSettings() {
     pr.onfocus = () => pr.select();
     pr.onchange = () => {
       const v = parseFloat(pr.value); d.price = (isNaN(v)||v<0)?0:v;
+      pr.value = d.price;
       saveSettings(); renderTally();
       syncMenuItem(d.id, { p_price: d.price });
     };
@@ -1788,6 +1843,19 @@ function hideLobby() {
    everything is held in these two arrays until submit. ── */
 let createPanelDiners = [];
 let createPanelSeasonal = [];
+let createPanelBusy = false;
+
+function setCreatePanelBusy(busy) {
+  createPanelBusy = busy;
+  const overlay = document.getElementById('createPanelOverlay');
+  overlay.querySelectorAll('input, button').forEach(el => { el.disabled = busy; });
+  const btn = document.getElementById('createPanelSubmitBtn');
+  btn.classList.toggle('is-loading', busy);
+  btn.setAttribute('aria-busy', String(busy));
+  btn.innerHTML = busy
+    ? `<span class="btn-spinner" aria-hidden="true"></span><span>${i18n[currentLang].createPanelLoading}</span>`
+    : i18n[currentLang].createPanelSubmitBtn;
+}
 
 function openCreatePanel() {
   createPanelDiners = [];
@@ -1798,16 +1866,23 @@ function openCreatePanel() {
   document.getElementById('createSeasPrice').value = '';
   renderCreatePanelDiners();
   renderCreatePanelSeasonal();
+  setCreatePanelBusy(false);
   document.getElementById('createPanelOverlay').classList.remove('hidden');
   document.getElementById('createName').focus();
 }
 function closeCreatePanel() {
+  if (createPanelBusy) return;
   document.getElementById('createPanelOverlay').classList.add('hidden');
 }
 function addCreatePanelDiner() {
   const inp = document.getElementById('createDinerName');
   const name = inp.value.trim();
   if (!name) return;
+  // The host already occupies one of the eight diner slots.
+  if (createPanelDiners.length >= MAX_PEOPLE - 1) {
+    toast(i18n[currentLang].maxPeopleMsg);
+    return;
+  }
   createPanelDiners.push(name);
   inp.value = '';
   renderCreatePanelDiners();
@@ -1849,52 +1924,61 @@ function renderCreatePanelSeasonal() {
 
 async function submitCreatePanel() {
   const t = i18n[currentLang];
+  if (createPanelBusy) return;
   const name = document.getElementById('createName').value.trim();
-  const btn = document.getElementById('createPanelSubmitBtn');
-  btn.disabled = true;
-  const { data, error } = await supabaseClient.rpc('create_bill', { p_host_name: name });
-  if (error || !data) {
-    btn.disabled = false;
-    console.error('create_bill failed:', error);
-    toast(t.lobbyNetworkError);
+  if (createPanelDiners.length + 1 > MAX_PEOPLE) {
+    toast(t.maxPeopleMsg);
     return;
   }
+  setCreatePanelBusy(true);
+  try {
+    const { data, error } = await supabaseClient.rpc('create_bill', { p_host_name: name });
+    if (error || !data) {
+      console.error('create_bill failed:', error);
+      toast(t.lobbyNetworkError);
+      return;
+    }
 
-  // a fresh room has no menu yet -- seed it with the same default plates the offline app uses,
-  // then anything typed into the panel. Sequential, not Promise.all: the display order is
-  // already guaranteed by sortMenuArrays() regardless, but seeding in order means the underlying
-  // created_at timestamps also reflect the intended order, rather than whatever order parallel
-  // requests happened to land in.
-  for (const d of DEFAULT_STANDARD) {
-    const r = await supabaseClient.rpc('add_menu_item', { p_bill: data.bill.id, p_dish_key: d.id, p_name: d.name, p_price: d.price, p_kind: 'standard' });
-    if (r.error) console.error('seed dish failed:', d.id, r.error);
-  }
-  for (const dinerName of createPanelDiners) {
-    const r = await supabaseClient.rpc('add_diner', { p_bill: data.bill.id, p_name: dinerName });
-    if (r.error) console.error('add_diner (panel) failed:', dinerName, r.error);
-  }
-  for (const dish of createPanelSeasonal) {
-    const dishKey = 'seas_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
-    const r = await supabaseClient.rpc('add_menu_item', { p_bill: data.bill.id, p_dish_key: dishKey, p_name: dish.name, p_price: dish.price, p_kind: 'seasonal' });
-    if (r.error) console.error('add seasonal (panel) failed:', dish.name, r.error);
-  }
+    // a fresh room has no menu yet -- seed it with the same default plates the offline app uses,
+    // then anything typed into the panel. Sequential, not Promise.all: the display order is
+    // already guaranteed by sortMenuArrays() regardless, but seeding in order means the underlying
+    // created_at timestamps also reflect the intended order, rather than whatever order parallel
+    // requests happened to land in.
+    for (const d of DEFAULT_STANDARD) {
+      const r = await supabaseClient.rpc('add_menu_item', { p_bill: data.bill.id, p_dish_key: d.id, p_name: d.name, p_price: d.price, p_kind: 'standard' });
+      if (r.error) console.error('seed dish failed:', d.id, r.error);
+    }
+    for (const dinerName of createPanelDiners) {
+      const r = await supabaseClient.rpc('add_diner', { p_bill: data.bill.id, p_name: dinerName });
+      if (r.error) console.error('add_diner (panel) failed:', dinerName, r.error);
+    }
+    for (const dish of createPanelSeasonal) {
+      const dishKey = 'seas_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+      const r = await supabaseClient.rpc('add_menu_item', { p_bill: data.bill.id, p_dish_key: dishKey, p_name: dish.name, p_price: dish.price, p_kind: 'seasonal' });
+      if (r.error) console.error('add seasonal (panel) failed:', dish.name, r.error);
+    }
 
-  // re-fetch the full room state now that everything's seeded, so the fold includes it all
-  const fresh = await supabaseClient.rpc('join_room', { p_room: data.bill.room_code });
-  btn.disabled = false;
-  if (fresh.error || !fresh.data) {
-    console.error('re-fetch after create failed:', fresh.error);
+    // re-fetch the full room state now that everything's seeded, so the fold includes it all
+    const fresh = await supabaseClient.rpc('join_room', { p_room: data.bill.room_code });
+    if (fresh.error || !fresh.data) {
+      console.error('re-fetch after create failed:', fresh.error);
+      toast(t.lobbyNetworkError);
+      return;
+    }
+
+    saveRoom({ bill_id: fresh.data.bill.id, room_code: fresh.data.bill.room_code, diner_id: data.host_diner_id, device_id: getDeviceId() });
+    enterRoom(fresh.data);
+    showRoomBadge(fresh.data.bill.room_code);
+    document.getElementById('createPanelOverlay').classList.add('hidden');
+    hideLobby();
+    toast(t.lobbyRoomCreated.replace('{code}', fresh.data.bill.room_code));
+    claimDiner(data.host_diner_id); // you obviously are the diner you just created
+  } catch (err) {
+    console.error('create room failed:', err);
     toast(t.lobbyNetworkError);
-    return;
+  } finally {
+    setCreatePanelBusy(false);
   }
-
-  saveRoom({ bill_id: fresh.data.bill.id, room_code: fresh.data.bill.room_code, diner_id: data.host_diner_id, device_id: getDeviceId() });
-  enterRoom(fresh.data);
-  showRoomBadge(fresh.data.bill.room_code);
-  closeCreatePanel();
-  hideLobby();
-  toast(t.lobbyRoomCreated.replace('{code}', fresh.data.bill.room_code));
-  claimDiner(data.host_diner_id); // you obviously are the diner you just created
 }
 
 /* ── join-room panel: validates the code first, then shows a name field plus,
@@ -1928,7 +2012,7 @@ function openJoinPanel(code, data) {
   const list = document.getElementById('joinPanelPickList');
   if (unclaimed.length) {
     list.innerHTML = unclaimed.map(d => `
-      <button type="button" class="btn ghost sm panel-pick-btn" data-id="${d.id}">${escapeHtml(d.name || t.personDefault)}</button>
+      <button type="button" class="btn ghost sm panel-pick-btn" data-id="${d.id}">👤 ${escapeHtml(d.name || t.personDefault)}</button>
     `).join('');
     list.querySelectorAll('.panel-pick-btn').forEach(b => {
       b.onclick = () => submitJoinPanel({ existingDinerId: b.dataset.id });
@@ -1939,7 +2023,8 @@ function openJoinPanel(code, data) {
   }
   document.getElementById('joinName').value = '';
   document.getElementById('joinPanelOverlay').classList.remove('hidden');
-  document.getElementById('joinName').focus();
+  if (unclaimed.length) list.querySelector('.panel-pick-btn').focus();
+  else document.getElementById('joinName').focus();
 }
 function closeJoinPanel() {
   document.getElementById('joinPanelOverlay').classList.add('hidden');
@@ -1959,6 +2044,11 @@ async function submitJoinPanel(opts) {
 
   if (!dinerId) {
     const name = document.getElementById('joinName').value.trim();
+    if ((joinPanelRoomData.diners || []).length >= MAX_PEOPLE) {
+      submitBtn.disabled = false;
+      toast(t.maxPeopleMsg);
+      return;
+    }
     const { data: newDinerId, error: dinerErr } = await supabaseClient.rpc('add_diner', { p_bill: joinPanelRoomData.bill.id, p_name: name });
     if (dinerErr) {
       submitBtn.disabled = false;
@@ -1989,7 +2079,41 @@ async function submitJoinPanel(opts) {
 }
 
 function useOffline() {
+  // Choosing the standalone mode explicitly abandons any saved room resume
+  // pointer. Keeping it would mislabel later offline history with that room.
+  localStorage.removeItem('kaiten_room_v1');
   hideLobby();
+}
+
+// Resume the same room and diner after a refresh/PWA relaunch. saveRoom()
+// has always persisted this pointer; startup simply never consumed it, which
+// forced a returning device to create a duplicate diner before it could get
+// back into its still-active room.
+async function restoreSavedRoom() {
+  const room = getRoom();
+  if (!room || !room.room_code) return false;
+
+  const { data, error } = await supabaseClient.rpc('join_room', { p_room: room.room_code });
+  if (error) {
+    console.error('restore saved room failed:', error);
+    toast(i18n[currentLang].lobbyNetworkError);
+    return false; // keep the pointer so a later online reload can retry
+  }
+  // Active room codes can eventually be reused after an old bill closes, so
+  // match the immutable bill UUID too before resuming silently.
+  if (!data || !data.bill || data.bill.id !== room.bill_id) {
+    localStorage.removeItem('kaiten_room_v1'); // closed, expired, or otherwise gone
+    return false;
+  }
+
+  if (!(data.diners || []).some(d => d.id === room.diner_id)) {
+    room.diner_id = null; // the saved diner may have been removed by the table
+    saveRoom(room);
+  }
+  enterRoom(data);
+  showRoomBadge(data.bill.room_code);
+  hideLobby();
+  return true;
 }
 
 // Turn a join_room-shaped snapshot {bill, diners, menu_items, events} into the
@@ -2425,7 +2549,7 @@ async function addSeasonal() {
   document.getElementById('seasName').value  = '';
   document.getElementById('seasPrice').value = '';
   saveSettings(); renderSettings(); renderTally();
-  toast(t.msgAdded.replace('{name}', escapeHtml(name)));
+  toast(t.msgAdded.replace('{name}', name));
 }
 function newBill() {
   if (!confirm(i18n[currentLang].confirmNewBill)) return;
@@ -2572,17 +2696,17 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// Auto-join via a shared link (?room=code): skips the manual "type the
-// code" step entirely. Strip the param from the URL bar immediately (before
-// the join even resolves) so a later reload of this same tab -- e.g. one of
-// the app's own programmatic reloads after closing a bill -- doesn't
-// silently re-trigger the join prompt.
-(function joinFromSharedLink() {
+// A shared link takes precedence over a previously saved room. Otherwise,
+// resume the active room automatically after a refresh or PWA relaunch.
+(async function enterInitialRoom() {
   const roomFromLink = new URLSearchParams(window.location.search).get('room');
-  if (!roomFromLink) return;
-  history.replaceState(null, '', window.location.pathname);
-  document.getElementById('lobbyCodeInput').value = roomFromLink;
-  joinRoomByCode();
+  if (roomFromLink) {
+    history.replaceState(null, '', window.location.pathname);
+    document.getElementById('lobbyCodeInput').value = roomFromLink;
+    joinRoomByCode();
+    return;
+  }
+  await restoreSavedRoom();
 })();
 </script>
 </body>

@@ -1,4 +1,4 @@
-const CACHE = 'sushi-split-v12';
+const CACHE = 'sushi-split-v14';
 const ASSETS = [
   './index.html',
   './manifest.json',
