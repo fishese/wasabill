@@ -418,6 +418,18 @@
     background:#F5FBF7!important; border-color:var(--accent2)!important;
     box-shadow:0 0 0 3px rgba(95,143,117,.14); outline:none;
   }
+  .panel-pick-btn.is-claimed{
+    color:#7A5A28!important; border-color:rgba(245,166,35,.45)!important;
+    background:#FFFBF3!important;
+  }
+  .panel-pick-btn.is-claimed:hover,.panel-pick-btn.is-claimed:focus-visible{
+    background:#FFF7E8!important; border-color:#D9941F!important;
+    box-shadow:0 0 0 3px rgba(245,166,35,.14);
+  }
+  .panel-pick-status{
+    margin-left:5px; padding:1px 5px; border-radius:7px;
+    background:rgba(245,166,35,.14); font-size:10px; font-weight:800;
+  }
   .room-badge{
     display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700;
     background:rgba(255,255,255,0.2); color:#fff; padding:4px 10px; border-radius:20px;
@@ -791,6 +803,8 @@ const i18n = {
     createPanelSubmitBtn:'Create Room', createPanelLoading:'Creating room…', createPanelCancelBtn:'Cancel',
     joinPanelTitle:'Join this room', joinPanelPickTitle:'Your name may already be here',
     joinPanelPickHint:'Pick it below to rejoin without adding a duplicate.',
+    joinPanelInUse:'in use',
+    confirmReclaimDiner:'“{name}” is already in use on another browser. Rejoin as this diner?',
     joinPanelOr:'or enter your name', joinNamePlaceholder:"What's your name?",
     joinPanelSubmitBtn:'Join', joinPanelCancelBtn:'Cancel'
   },
@@ -868,6 +882,8 @@ const i18n = {
     createPanelSubmitBtn:'建立房間', createPanelLoading:'建立房間中…', createPanelCancelBtn:'取消',
     joinPanelTitle:'加入呢個房間', joinPanelPickTitle:'可能已經有你個名',
     joinPanelPickHint:'見到自己個名就直接撳，唔使再新增一位。',
+    joinPanelInUse:'使用中',
+    confirmReclaimDiner:'「{name}」已經喺另一個瀏覽器使用中。要用呢個身份重新加入？',
     joinPanelOr:'或者輸入你嘅名', joinNamePlaceholder:'你叫咩名？',
     joinPanelSubmitBtn:'加入', joinPanelCancelBtn:'取消'
   }
@@ -2007,15 +2023,28 @@ function openJoinPanel(code, data) {
   const t = i18n[currentLang];
   joinPanelCode = code;
   joinPanelRoomData = data;
-  const unclaimed = (data.diners || []).filter(d => !d.claimed_by_device);
+  // Every existing diner remains adoptable. The room code is intentionally
+  // the trust boundary, and someone may simply have opened it in a different
+  // browser. Already-claimed diners get one lightweight confirmation.
+  const existingDiners = data.diners || [];
   const pickSection = document.getElementById('joinPanelPickSection');
   const list = document.getElementById('joinPanelPickList');
-  if (unclaimed.length) {
-    list.innerHTML = unclaimed.map(d => `
-      <button type="button" class="btn ghost sm panel-pick-btn" data-id="${d.id}">👤 ${escapeHtml(d.name || t.personDefault)}</button>
-    `).join('');
+  if (existingDiners.length) {
+    list.innerHTML = existingDiners.map((d, idx) => {
+      const name = d.name || (t.personDefault + (idx + 1));
+      const claimed = !!d.claimed_by_device;
+      return `
+        <button type="button" class="btn ghost sm panel-pick-btn${claimed ? ' is-claimed' : ''}"
+                data-id="${d.id}" data-name="${escapeHtml(name)}" data-claimed="${claimed}">
+          👤 ${escapeHtml(name)}${claimed ? ` <span class="panel-pick-status">${t.joinPanelInUse}</span>` : ''}
+        </button>`;
+    }).join('');
     list.querySelectorAll('.panel-pick-btn').forEach(b => {
-      b.onclick = () => submitJoinPanel({ existingDinerId: b.dataset.id });
+      b.onclick = () => submitJoinPanel({
+        existingDinerId: b.dataset.id,
+        existingDinerName: b.dataset.name,
+        needsReclaimConfirmation: b.dataset.claimed === 'true'
+      });
     });
     pickSection.style.display = '';
   } else {
@@ -2023,7 +2052,7 @@ function openJoinPanel(code, data) {
   }
   document.getElementById('joinName').value = '';
   document.getElementById('joinPanelOverlay').classList.remove('hidden');
-  if (unclaimed.length) list.querySelector('.panel-pick-btn').focus();
+  if (existingDiners.length) list.querySelector('.panel-pick-btn').focus();
   else document.getElementById('joinName').focus();
 }
 function closeJoinPanel() {
@@ -2036,6 +2065,10 @@ async function submitJoinPanel(opts) {
   const t = i18n[currentLang];
   if (!joinPanelRoomData) return;
   const existingDinerId = opts && opts.existingDinerId;
+  if (existingDinerId && opts.needsReclaimConfirmation) {
+    const dinerName = opts.existingDinerName || t.personDefault;
+    if (!confirm(t.confirmReclaimDiner.replace('{name}', dinerName))) return;
+  }
   const submitBtn = document.getElementById('joinPanelSubmitBtn');
   submitBtn.disabled = true;
 
