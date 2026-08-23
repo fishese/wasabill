@@ -450,6 +450,10 @@
     background:#F5A623; color:#3A3532; text-align:center; font-weight:700; font-size:13px;
     padding:8px 12px;
   }
+  .menu-actions{display:flex;gap:8px;flex-wrap:wrap;padding:8px 0 2px}
+  .menu-row{display:flex;gap:10px;align-items:center;padding:12px 0;border-top:1px dashed var(--line)}
+  .menu-row:first-child{border-top:none}.menu-row-main{flex:1;min-width:0}.menu-row-name{font-weight:800}.menu-row-meta{font-size:12px;color:var(--muted);margin-top:2px}
+  .menu-row-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}.menu-note{font-size:12px;color:var(--muted);margin:6px 0 0}
 </style>
 </head>
 <body>
@@ -474,6 +478,11 @@
     <input class="text" id="createName" style="margin-bottom:6px;">
 
     <div class="panel-section">
+      <div class="panel-section-title" id="lblCreateMenuTitle">Menu</div>
+      <select class="text" id="createMenuSelect"></select>
+    </div>
+
+    <div class="panel-section">
       <div class="panel-section-title" id="lblCreatePanelDinersTitle"></div>
       <div id="createDinerList"></div>
       <div class="panel-add-row">
@@ -494,6 +503,37 @@
 
     <button class="btn primary" id="createPanelSubmitBtn" aria-live="polite" style="width:100%; margin-top:10px;"></button>
     <button class="btn ghost" id="createPanelCancelBtn" style="width:100%; margin-top:8px;"></button>
+  </div>
+</div>
+
+<div id="savedMenusOverlay" class="lobby-overlay hidden">
+  <div class="lobby-card form-card">
+    <h1 id="lblMyMenusTitle" style="margin:0 0 6px;font-size:18px;text-align:center;">My menus</h1>
+    <p class="muted" id="lblMenusLocalNote" style="margin:0 0 12px;text-align:center;">Saved menu snapshots stay on this device.</p>
+    <div id="savedMenusList"></div>
+    <input type="file" id="menuImportFile" accept=".json,.wasabill-menu.json,application/json" hidden>
+    <div class="menu-actions"><button class="btn ghost sm" id="menuImportBtn">Import file</button><button class="btn ghost sm" id="savedMenusCloseBtn">Close</button></div>
+  </div>
+</div>
+
+<div id="saveMenuOverlay" class="lobby-overlay hidden">
+  <div class="lobby-card form-card">
+    <h1 id="lblSaveMenuTitle" style="margin:0 0 14px;font-size:18px;text-align:center;">Save menu</h1>
+    <input class="text" id="saveMenuName" placeholder="Menu name" style="margin-bottom:8px;">
+    <input class="text" id="saveMenuRestaurant" placeholder="Restaurant (optional)" style="margin-bottom:10px;">
+    <div class="muted" style="display:block;margin-bottom:12px;"><label><input type="radio" name="saveMenuType" value="full" checked> <span id="lblFullMenuOption">Full menu</span></label> &nbsp; <label><input type="radio" name="saveMenuType" value="seasonal"> <span id="lblSeasonalMenuOption">Seasonal specials only</span></label></div>
+    <button class="btn primary" id="saveMenuSubmitBtn" style="width:100%;">Save menu</button>
+    <button class="btn ghost" id="saveMenuCancelBtn" style="width:100%;margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<div id="menuImportOverlay" class="lobby-overlay hidden">
+  <div class="lobby-card form-card">
+    <h1 id="menuImportTitle" style="margin:0 0 6px;font-size:18px;text-align:center;"></h1>
+    <p class="muted" id="menuImportDetails" style="margin:0 0 14px;text-align:center;"></p>
+    <button class="btn primary" id="menuImportApplyBtn" style="width:100%;"></button>
+    <button class="btn ghost" id="menuImportSaveBtn" style="width:100%;margin-top:8px;">Save to My Menus</button>
+    <button class="btn ghost" id="menuImportCancelBtn" style="width:100%;margin-top:8px;">Cancel</button>
   </div>
 </div>
 
@@ -657,6 +697,12 @@
     </div>
 
     <div class="card">
+      <h2><span class="ico">📋</span> <span id="lblMenuTitle">Menu</span></h2>
+      <p class="muted" id="lblMenuIntro" style="margin-top:-4px">Save reusable restaurant menus, share them, or import one from a friend.</p>
+      <div class="menu-actions"><button class="btn primary sm" id="saveMenuBtn">Save menu</button><button class="btn ghost sm" id="myMenusBtn">My menus</button></div>
+    </div>
+
+    <div class="card">
       <h2><span class="ico">🍽️</span> <span id="lblStandardDishes">標準碟類</span></h2>
       <p class="muted" style="margin-top:-4px" id="lblEditPricesMuted">可隨時修改單價。這些項目在計帳頁面會顯示對應圖示。</p>
       <div id="standardList"></div>
@@ -716,6 +762,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 const LS_SETTINGS = 'kaiten_settings_v1';
 const LS_TALLY    = 'kaiten_tally_v1';
 const LS_LANG     = 'kaiten_lang_v1';
+const LS_MENUS    = 'kaiten_menus_v1';
 const MAX_PEOPLE  = 8;
 const SERVICE_RATE = 0.10;
 
@@ -801,6 +848,20 @@ const i18n = {
     createPanelAddBtn:'Add',
     createPanelSeasonalTitle:'Seasonal dishes (optional)',
     createPanelSubmitBtn:'Create Room', createPanelLoading:'Creating room…', createPanelCancelBtn:'Cancel',
+    menuTitle:'Menu', menuIntro:'Save reusable restaurant menus, share them, or import one from a friend.',
+    saveMenuBtn:'Save menu', myMenusBtn:'My menus', menusLocalNote:'Saved menu snapshots stay on this device.',
+    importMenuBtn:'Import file', noSavedMenus:'No saved menus yet.', defaultMenu:'Default menu',
+    fullMenuLabel:'Full menu', seasonalSetLabel:'Seasonal set', fullMenuOption:'Full menu', seasonalMenuOption:'Seasonal specials only',
+    menuPlateCount:'{count} plates', menuSpecialCount:'{count} specials', useMenuBtn:'Use', addMenuBtn:'Add',
+    exportMenuBtn:'Export', updateMenuBtn:'Update', duplicateMenuBtn:'Duplicate', editMenuBtn:'Edit', deleteMenuBtn:'Delete',
+    menuNamePlaceholder:'Menu name', restaurantPlaceholder:'Restaurant (optional)', saveToMenusBtn:'Save to My Menus',
+    menuSavedToast:'Menu saved', menuUpdatedToast:'Saved menu updated', menuAppliedToast:'Menu applied', seasonalAddedToast:'Seasonal dishes added', menuLinkCopied:'Menu link copied',
+    duplicateMenuToast:'Duplicated “{name}”', confirmDeleteMenu:'Delete “{name}”?', menuNamePrompt:'Menu name',
+    importUseMenuBtn:'Use menu', importAddMenuBtn:'Add to current menu', importError:'Could not import menu: {error}',
+    sharedMenuTooLarge:'This menu is too large for a link. Export the menu file instead.',
+    emptySeasonalMenu:'Add at least one seasonal dish first',
+    activeSharedMenu:'Create a new shared room with “{name}” to use this full menu.',
+    offlineTalliesMenu:'This bill already has items tallied. Start a new bill with “{name}”?', openMenuShareText:'Open this menu in Wasabill',
     joinPanelTitle:'Join this room', joinPanelPickTitle:'Your name may already be here',
     joinPanelPickHint:'Pick it below to rejoin without adding a duplicate.',
     joinPanelInUse:'in use',
@@ -880,6 +941,20 @@ const i18n = {
     createPanelAddBtn:'新增',
     createPanelSeasonalTitle:'季節限定（可選）',
     createPanelSubmitBtn:'建立房間', createPanelLoading:'建立房間中…', createPanelCancelBtn:'取消',
+    menuTitle:'餐牌', menuIntro:'儲存常用餐牌、分享俾朋友，或者匯入其他餐牌。',
+    saveMenuBtn:'儲存餐牌', myMenusBtn:'我的餐牌', menusLocalNote:'已儲存嘅餐牌快照只會留喺呢部裝置。',
+    importMenuBtn:'匯入檔案', noSavedMenus:'暫時未有已儲存嘅餐牌。', defaultMenu:'預設餐牌',
+    fullMenuLabel:'完整餐牌', seasonalSetLabel:'季節限定組合', fullMenuOption:'完整餐牌', seasonalMenuOption:'只儲存季節限定',
+    menuPlateCount:'{count} 款標準項目', menuSpecialCount:'{count} 款限定', useMenuBtn:'使用', addMenuBtn:'加入',
+    exportMenuBtn:'匯出', updateMenuBtn:'更新', duplicateMenuBtn:'複製', editMenuBtn:'改名', deleteMenuBtn:'刪除',
+    menuNamePlaceholder:'餐牌名稱', restaurantPlaceholder:'餐廳（可選）', saveToMenusBtn:'儲存到我的餐牌',
+    menuSavedToast:'餐牌已儲存', menuUpdatedToast:'餐牌已更新', menuAppliedToast:'已套用餐牌', seasonalAddedToast:'已加入季節限定', menuLinkCopied:'餐牌連結已複製',
+    duplicateMenuToast:'已複製「{name}」', confirmDeleteMenu:'確定要刪除「{name}」？', menuNamePrompt:'餐牌名稱',
+    importUseMenuBtn:'使用餐牌', importAddMenuBtn:'加入目前餐牌', importError:'無法匯入餐牌：{error}',
+    sharedMenuTooLarge:'呢張餐牌太大，未能製作分享連結。請改為匯出餐牌檔案。',
+    emptySeasonalMenu:'請先新增至少一款季節限定。',
+    activeSharedMenu:'請用「{name}」開一個新共享房間，以使用呢張完整餐牌。',
+    offlineTalliesMenu:'呢張帳單已經有計帳記錄。要用「{name}」開始新帳單嗎？', openMenuShareText:'喺數碟郎開啟呢張餐牌',
     joinPanelTitle:'加入呢個房間', joinPanelPickTitle:'可能已經有你個名',
     joinPanelPickHint:'見到自己個名就直接撳，唔使再新增一位。',
     joinPanelInUse:'使用中',
@@ -1023,6 +1098,178 @@ function loadTally() {
 }
 function saveTally() { if (isOnline) return; localStorage.setItem(LS_TALLY, JSON.stringify(tally)); }
 
+/* ── saved menus: schema, persistence and application ── */
+function menuId() { return 'menu_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
+function menuText(value, max, label, optional=false) {
+  if (value === undefined && optional) return '';
+  if (typeof value !== 'string') throw new Error(`${label} must be text`);
+  const text = value.trim();
+  if ((!optional && !text) || text.length > max) throw new Error(`Invalid ${label}`);
+  return text;
+}
+function normalizeMenuV1(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.wasabillMenu !== 1) throw new Error('Unsupported or invalid Wasabill menu');
+  if (!['full', 'seasonal'].includes(value.type)) throw new Error('Invalid menu type');
+  const menu = { wasabillMenu:1, type:value.type, name:menuText(value.name, 100, 'menu name'), restaurant:menuText(value.restaurant, 100, 'restaurant', true), seasonal:[] };
+  if (value.type === 'full') {
+    if (!Array.isArray(value.standard)) throw new Error('A full menu needs standard dishes');
+    const seen = new Set();
+    menu.standard = value.standard.map(d => {
+      if (!d || typeof d !== 'object' || !DEFAULT_BY_ID[d.id] || seen.has(d.id)) throw new Error('Invalid standard dish');
+      seen.add(d.id); const price = d.price;
+      if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) throw new Error('Invalid standard price');
+      return {id:d.id, price};
+    });
+  } else menu.standard = [];
+  if (!Array.isArray(value.seasonal) || value.seasonal.length > 100) throw new Error('Invalid seasonal dishes');
+  menu.seasonal = value.seasonal.map(d => {
+    if (!d || typeof d !== 'object') throw new Error('Invalid seasonal dish');
+    const name = menuText(d.name, 120, 'seasonal name'); const price = d.price;
+    if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) throw new Error('Invalid seasonal price');
+    return {name, price};
+  });
+  return menu;
+}
+function loadSavedMenus() {
+  let raw;
+  try { raw = JSON.parse(localStorage.getItem(LS_MENUS)); } catch(e) { return []; }
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set();
+  return raw.slice(0, 200).flatMap(item => {
+    try {
+      const menu = normalizeMenuV1(item);
+      const storedId = typeof item.id === 'string' && item.id.length <= 100 && !ids.has(item.id) ? item.id : menuId();
+      ids.add(storedId);
+      return [{...menu, id:storedId, createdAt:typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(), updatedAt:typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString()}];
+    } catch(e) { return []; }
+  });
+}
+function saveSavedMenus(menus) { localStorage.setItem(LS_MENUS, JSON.stringify(menus)); }
+function portableMenu(menu) { const m = normalizeMenuV1(menu); return m.restaurant ? m : (() => { delete m.restaurant; return m; })(); }
+function serializeCurrentMenu(type, metadata) {
+  return normalizeMenuV1({wasabillMenu:1, type, name:metadata.name, restaurant:metadata.restaurant, standard:type === 'full' ? settings.standard.map(d => ({id:d.id, price:d.price})) : [], seasonal:settings.seasonal.map(d => ({name:d.name, price:d.price}))});
+}
+function hasAnyTallies() { return tally.people.some(p => Object.values(p.counts || {}).some(n => Number(n) > 0)); }
+function normalizedDishName(name) { return name.trim().replace(/\s+/g, ' ').toLowerCase(); }
+function applySeasonalSet(menu) {
+  const incoming = normalizeMenuV1(menu);
+  const uniqueIncoming = new Map();
+  incoming.seasonal.forEach(d => uniqueIncoming.set(normalizedDishName(d.name), d));
+  const remoteOps = [];
+  uniqueIncoming.forEach(d => {
+    const found = settings.seasonal.find(x => normalizedDishName(x.name) === normalizedDishName(d.name));
+    if (found) { found.price = d.price; remoteOps.push({kind:'update', dish:found}); }
+    else {
+      const added = {id:'seas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name:d.name, price:d.price, seasonal:true, createdAt:new Date().toISOString()};
+      settings.seasonal.push(added); remoteOps.push({kind:'add', dish:added});
+    }
+  });
+  saveSettings(); renderSettings(); renderTally();
+  queueRoomMenuSync(async () => {
+    for (const op of remoteOps) {
+      if (op.kind === 'add') await syncSavedSeasonalToRoom(op.dish);
+      else await updateSavedSeasonalInRoom(op.dish);
+    }
+  });
+  toast(i18n[currentLang].seasonalAddedToast); return true;
+}
+async function syncSavedSeasonalToRoom(dish) {
+  if (!isOnline) return; const room = getRoom(); if (!room) return;
+  const {data:itemId, error} = await supabaseClient.rpc('add_menu_item', {p_bill:room.bill_id, p_dish_key:dish.id, p_name:dish.name, p_price:dish.price, p_kind:'seasonal'});
+  if (error) throw error;
+  if (itemId) { menuItemIdByDishKey[dish.id] = itemId; dishKeyByMenuItemId[itemId] = dish.id; }
+}
+async function updateSavedSeasonalInRoom(dish) {
+  if (!isOnline) return; const room = getRoom(); const itemId = menuItemIdByDishKey[dish.id]; if (!room || !itemId) return;
+  const {error} = await supabaseClient.rpc('update_menu_item', {p_bill:room.bill_id, p_item:itemId, p_price:dish.price});
+  if (error) throw error;
+}
+let roomMenuSyncQueue = Promise.resolve();
+function queueRoomMenuSync(work) {
+  if (!isOnline) return Promise.resolve();
+  roomMenuSyncQueue = roomMenuSyncQueue.then(work).catch(error => { console.error('saved menu sync failed:', error); toast(i18n[currentLang].onlineSaveFailed); });
+  return roomMenuSyncQueue;
+}
+function applyFullMenu(menu) {
+  const incoming = normalizeMenuV1(menu);
+  if (isOnline) { alert(i18n[currentLang].activeSharedMenu.replace('{name}', incoming.name)); return false; }
+  const proceed = () => {
+    if (hasAnyTallies()) tally.people.forEach(p => p.counts = {});
+    const prices = Object.fromEntries(incoming.standard.map(d => [d.id, d.price]));
+    settings.standard = DEFAULT_STANDARD.map(d => ({...structuredClone(d), price:Object.hasOwn(prices, d.id) ? prices[d.id] : d.price}));
+    settings.seasonal = incoming.seasonal.map(d => ({id:'seas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name:d.name, price:d.price, seasonal:true, createdAt:new Date().toISOString()}));
+    saveSettings(); saveTally(); renderSettings(); renderTally();
+    toast(i18n[currentLang].menuAppliedToast); return true;
+  };
+  if (hasAnyTallies() && !confirm(i18n[currentLang].offlineTalliesMenu.replace('{name}', incoming.name))) return false;
+  return proceed();
+}
+function encodeSharedMenu(menu) {
+  const bytes = new TextEncoder().encode(JSON.stringify(portableMenu(menu)));
+  let binary = ''; for (let i=0; i<bytes.length; i+=8192) binary += String.fromCharCode(...bytes.subarray(i, i+8192));
+  const encoded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  if (encoded.length > 30000) throw new Error(i18n[currentLang].sharedMenuTooLarge);
+  return encoded;
+}
+function decodeSharedMenu(encoded) {
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded) || encoded.length > 30000) throw new Error('Invalid shared menu link');
+  const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((encoded.length + 3) % 4);
+  const binary = atob(base64), bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+  return normalizeMenuV1(JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(bytes)));
+}
+function buildMenuShareUrl(menu) { return `${location.origin}${location.pathname}#menu=${encodeSharedMenu(menu)}`; }
+function downloadMenu(menu) { const a = document.createElement('a'); const url = URL.createObjectURL(new Blob([JSON.stringify(portableMenu(menu), null, 2)], {type:'application/json'})); a.href = url; a.download = `${menu.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'wasabill-menu'}.wasabill-menu.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 0); }
+let pendingImportedMenu = null;
+function savedMenuSummary(menu) { const t=i18n[currentLang], specials=t.menuSpecialCount.replace('{count}', menu.seasonal.length); return menu.type === 'full' ? `${t.menuPlateCount.replace('{count}', menu.standard.length)} · ${specials}` : specials; }
+function persistMenu(menu) {
+  const normalized = normalizeMenuV1(menu); const menus = loadSavedMenus();
+  const now = new Date().toISOString(); menus.unshift({...normalized, id:menuId(), createdAt:now, updatedAt:now}); saveSavedMenus(menus); return menus[0];
+}
+function openSavedMenus() {
+  const t=i18n[currentLang], list = document.getElementById('savedMenusList'), menus = loadSavedMenus(); list.textContent = '';
+  if (!menus.length) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = t.noSavedMenus; list.appendChild(p); }
+  menus.forEach(menu => {
+    const row = document.createElement('div'); row.className = 'menu-row'; const main = document.createElement('div'); main.className = 'menu-row-main';
+    const name = document.createElement('div'); name.className = 'menu-row-name'; name.textContent = menu.name;
+    const meta = document.createElement('div'); meta.className = 'menu-row-meta'; meta.textContent = `${menu.type === 'full' ? t.fullMenuLabel : t.seasonalSetLabel} · ${savedMenuSummary(menu)}${menu.restaurant ? ` · ${menu.restaurant}` : ''}`; main.append(name, meta);
+    const actions = document.createElement('div'); actions.className = 'menu-row-actions';
+    const action = (label, fn) => { const b=document.createElement('button'); b.className='btn ghost sm'; b.textContent=label; b.onclick=fn; actions.appendChild(b); };
+    action(menu.type === 'full' ? t.useMenuBtn : t.addMenuBtn, () => { const applied = menu.type === 'full' ? applyFullMenu(menu) : applySeasonalSet(menu); if (applied) document.getElementById('savedMenusOverlay').classList.add('hidden'); });
+    action(t.shareBtn, () => shareMenu(menu)); action(t.exportMenuBtn, () => downloadMenu(menu));
+    action(t.updateMenuBtn, () => { const menus=loadSavedMenus(); const idx=menus.findIndex(m => m.id === menu.id); if (idx < 0) return; try { const current=serializeCurrentMenu(menu.type, menu); if (menu.type === 'seasonal' && !current.seasonal.length) throw new Error(t.emptySeasonalMenu); menus[idx]={...current,id:menu.id,createdAt:menu.createdAt,updatedAt:new Date().toISOString()}; saveSavedMenus(menus); openSavedMenus(); toast(t.menuUpdatedToast); } catch(e) { alert(e.message); } });
+    action(t.duplicateMenuBtn, () => { try { const copy=persistMenu({...menu, name:`${menu.name.slice(0, 95)} copy`}); openSavedMenus(); toast(t.duplicateMenuToast.replace('{name}', copy.name)); } catch(e) { alert(e.message); } });
+    action(t.editMenuBtn, () => editSavedMenu(menu.id)); action(t.deleteMenuBtn, () => { if (!confirm(t.confirmDeleteMenu.replace('{name}', menu.name))) return; saveSavedMenus(loadSavedMenus().filter(m => m.id !== menu.id)); openSavedMenus(); });
+    row.append(main, actions); list.appendChild(row);
+  });
+  document.getElementById('savedMenusOverlay').classList.remove('hidden');
+}
+function editSavedMenu(id) {
+  const menus = loadSavedMenus(); const menu = menus.find(m => m.id === id); if (!menu) return;
+  const name = prompt(i18n[currentLang].menuNamePrompt, menu.name); if (name === null) return;
+  try { menu.name = menuText(name, 100, 'menu name'); menu.updatedAt = new Date().toISOString(); saveSavedMenus(menus); openSavedMenus(); } catch(e) { alert(e.message); }
+}
+function shareMenu(menu) {
+  let url; try { url = buildMenuShareUrl(menu); } catch(e) { alert(e.message); return; }
+  const text = `🍣 ${menu.name}\n${i18n[currentLang].openMenuShareText}`;
+  if (navigator.share) navigator.share({title:menu.name, text, url}).catch(error => { if (error && error.name !== 'AbortError') copyMenuLink(url); });
+  else copyMenuLink(url);
+}
+function copyMenuLink(url) { navigator.clipboard.writeText(url).then(() => toast(i18n[currentLang].menuLinkCopied)).catch(() => prompt(i18n[currentLang].copyLinkBtn, url)); }
+function openMenuImportPreview(menu) {
+  pendingImportedMenu = normalizeMenuV1(menu);
+  document.getElementById('menuImportTitle').textContent = pendingImportedMenu.name;
+  document.getElementById('menuImportDetails').textContent = savedMenuSummary(pendingImportedMenu);
+  document.getElementById('menuImportApplyBtn').textContent = pendingImportedMenu.type === 'full' ? i18n[currentLang].importUseMenuBtn : i18n[currentLang].importAddMenuBtn;
+  document.getElementById('menuImportOverlay').classList.remove('hidden');
+}
+function closeMenuImportPreview() { pendingImportedMenu = null; document.getElementById('menuImportOverlay').classList.add('hidden'); if (location.hash.startsWith('#menu=')) history.replaceState(null, '', location.pathname + location.search); }
+function renderCreateMenuOptions() {
+  const select = document.getElementById('createMenuSelect'); const selected = select.value; select.textContent = '';
+  const defaultOption = document.createElement('option'); defaultOption.value = ''; defaultOption.textContent = i18n[currentLang].defaultMenu; select.appendChild(defaultOption);
+  loadSavedMenus().filter(m => m.type === 'full').forEach(menu => { const o=document.createElement('option'); o.value=menu.id; o.textContent=menu.restaurant ? `${menu.name} — ${menu.restaurant}` : menu.name; select.appendChild(o); });
+  select.value = [...select.options].some(o => o.value === selected) ? selected : '';
+}
+
 /* ── i18n ── */
 function updateStaticLabels() {
   const t = i18n[currentLang];
@@ -1071,7 +1318,25 @@ function updateStaticLabels() {
   document.getElementById('lobbyJoinBtn').textContent       = t.lobbyJoinBtn;
   document.getElementById('lobbyOfflineBtn').textContent    = t.lobbyOfflineBtn;
   document.getElementById('saveToHistoryBtn').textContent   = t.saveToHistoryBtn;
+  document.getElementById('lblMenuTitle').textContent       = t.menuTitle;
+  document.getElementById('lblMenuIntro').textContent       = t.menuIntro;
+  document.getElementById('saveMenuBtn').textContent        = t.saveMenuBtn;
+  document.getElementById('myMenusBtn').textContent         = t.myMenusBtn;
+  document.getElementById('lblMyMenusTitle').textContent    = t.myMenusBtn;
+  document.getElementById('lblMenusLocalNote').textContent  = t.menusLocalNote;
+  document.getElementById('menuImportBtn').textContent      = t.importMenuBtn;
+  document.getElementById('savedMenusCloseBtn').textContent = t.closeBtn;
+  document.getElementById('lblSaveMenuTitle').textContent   = t.saveMenuBtn;
+  document.getElementById('saveMenuName').placeholder       = t.menuNamePlaceholder;
+  document.getElementById('saveMenuRestaurant').placeholder = t.restaurantPlaceholder;
+  document.getElementById('lblFullMenuOption').textContent  = t.fullMenuOption;
+  document.getElementById('lblSeasonalMenuOption').textContent = t.seasonalMenuOption;
+  document.getElementById('saveMenuSubmitBtn').textContent  = t.saveMenuBtn;
+  document.getElementById('saveMenuCancelBtn').textContent  = t.createPanelCancelBtn;
+  document.getElementById('menuImportSaveBtn').textContent  = t.saveToMenusBtn;
+  document.getElementById('menuImportCancelBtn').textContent = t.createPanelCancelBtn;
   document.getElementById('lblCreatePanelTitle').textContent       = t.createPanelTitle;
+  document.getElementById('lblCreateMenuTitle').textContent        = t.menuTitle;
   document.getElementById('createName').placeholder               = t.createNamePlaceholder;
   document.getElementById('lblCreatePanelDinersTitle').textContent = t.createPanelDinersTitle;
   document.getElementById('createDinerName').placeholder          = t.createDinerPlaceholder;
@@ -1636,15 +1901,18 @@ function renderSettings() {
     const inp = document.createElement('input'); inp.className = 'price'; inp.type = 'number'; inp.step = '1'; inp.value = d.price;
 
     inp.onfocus = () => inp.select();
-    inp.onchange = () => {
+    const commitPrice = () => {
       const v = parseFloat(inp.value);
-      d.price = (isNaN(v) || v < 0) ? 0 : v;
+      const next = (isNaN(v) || v < 0) ? 0 : v;
+      if (d.price === next) { inp.value = next; return; }
+      d.price = next;
       inp.value = d.price;
       saveSettings(); renderTally();
       if (d.kind === 'discount') renderSettings();
       toast(i18n[currentLang].msgPriceUpdated);
       syncMenuItem(d.id, { p_price: d.price });
     };
+    inp.onchange = commitPrice; inp.onblur = commitPrice;
     pw.append(sym, inp); row.append(ic, nm, pw); sl.appendChild(row);
   });
 
@@ -1654,22 +1922,28 @@ function renderSettings() {
   settings.seasonal.forEach(d => {
     const row = document.createElement('div'); row.className = 'seas';
     const nm  = document.createElement('input'); nm.className = 'text'; nm.value = d.name; nm.style.flex = '1';
-    nm.onchange = () => {
-      d.name = nm.value || i18n[currentLang].seasonalDefaultName;
+    const commitName = () => {
+      const next = nm.value.trim() || i18n[currentLang].seasonalDefaultName;
+      if (d.name === next) { nm.value = next; return; }
+      d.name = next;
       saveSettings(); renderTally();
       syncMenuItem(d.id, { p_name: d.name });
     };
+    nm.onchange = commitName; nm.onblur = commitName;
     const pw  = document.createElement('div'); pw.className = 'pricewrap';
     const sym = document.createElement('span'); sym.textContent = '$';
     const pr  = document.createElement('input'); pr.className = 'price'; pr.type = 'number'; pr.step = '1'; pr.value = d.price;
 
     pr.onfocus = () => pr.select();
-    pr.onchange = () => {
-      const v = parseFloat(pr.value); d.price = (isNaN(v)||v<0)?0:v;
+    const commitSeasonalPrice = () => {
+      const v = parseFloat(pr.value), next = (isNaN(v)||v<0)?0:v;
+      if (d.price === next) { pr.value = next; return; }
+      d.price = next;
       pr.value = d.price;
       saveSettings(); renderTally();
       syncMenuItem(d.id, { p_price: d.price });
     };
+    pr.onchange = commitSeasonalPrice; pr.onblur = commitSeasonalPrice;
     pw.append(sym, pr);
     const del = document.createElement('button'); del.className = 'del'; del.innerHTML = '&times;'; del.title = i18n[currentLang].delTitle;
     del.onclick = async () => {
@@ -1859,6 +2133,7 @@ function hideLobby() {
    everything is held in these two arrays until submit. ── */
 let createPanelDiners = [];
 let createPanelSeasonal = [];
+let createPanelStandard = structuredClone(DEFAULT_STANDARD);
 let createPanelBusy = false;
 
 function setCreatePanelBusy(busy) {
@@ -1876,6 +2151,9 @@ function setCreatePanelBusy(busy) {
 function openCreatePanel() {
   createPanelDiners = [];
   createPanelSeasonal = [];
+  createPanelStandard = structuredClone(DEFAULT_STANDARD);
+  renderCreateMenuOptions();
+  document.getElementById('createMenuSelect').value = '';
   document.getElementById('createName').value = '';
   document.getElementById('createDinerName').value = '';
   document.getElementById('createSeasName').value = '';
@@ -1890,7 +2168,7 @@ function closeCreatePanel() {
   if (createPanelBusy) return;
   document.getElementById('createPanelOverlay').classList.add('hidden');
 }
-function addCreatePanelDiner() {
+function addCreatePanelDiner(refocus=true) {
   const inp = document.getElementById('createDinerName');
   const name = inp.value.trim();
   if (!name) return;
@@ -1902,7 +2180,7 @@ function addCreatePanelDiner() {
   createPanelDiners.push(name);
   inp.value = '';
   renderCreatePanelDiners();
-  inp.focus();
+  if (refocus) inp.focus();
 }
 function renderCreatePanelDiners() {
   const list = document.getElementById('createDinerList');
@@ -1914,7 +2192,7 @@ function renderCreatePanelDiners() {
     btn.onclick = () => { createPanelDiners.splice(Number(btn.dataset.idx), 1); renderCreatePanelDiners(); };
   });
 }
-function addCreatePanelSeasonal() {
+function addCreatePanelSeasonal(refocus=true) {
   const t = i18n[currentLang];
   const nameInp = document.getElementById('createSeasName');
   const priceInp = document.getElementById('createSeasPrice');
@@ -1925,7 +2203,13 @@ function addCreatePanelSeasonal() {
   createPanelSeasonal.push({ name, price });
   nameInp.value = ''; priceInp.value = '';
   renderCreatePanelSeasonal();
-  nameInp.focus();
+  if (refocus) nameInp.focus();
+}
+function addCreatePanelSeasonalIfComplete(showErrors=false, refocus=false) {
+  const hasName = !!document.getElementById('createSeasName').value.trim();
+  const hasPrice = document.getElementById('createSeasPrice').value.trim() !== '';
+  if (hasName && hasPrice) return addCreatePanelSeasonal(refocus);
+  if (showErrors && (hasName || hasPrice)) return addCreatePanelSeasonal(refocus);
 }
 function renderCreatePanelSeasonal() {
   const list = document.getElementById('createSeasList');
@@ -1960,7 +2244,7 @@ async function submitCreatePanel() {
     // already guaranteed by sortMenuArrays() regardless, but seeding in order means the underlying
     // created_at timestamps also reflect the intended order, rather than whatever order parallel
     // requests happened to land in.
-    for (const d of DEFAULT_STANDARD) {
+    for (const d of createPanelStandard) {
       const r = await supabaseClient.rpc('add_menu_item', { p_bill: data.bill.id, p_dish_key: d.id, p_name: d.name, p_price: d.price, p_kind: 'standard' });
       if (r.error) console.error('seed dish failed:', d.id, r.error);
     }
@@ -2558,31 +2842,42 @@ function renderHistory() {
 }
 
 /* ── actions ── */
+let seasonalAddBusy = false;
 async function addSeasonal() {
+  if (seasonalAddBusy) return;
   const t     = i18n[currentLang];
   const name  = document.getElementById('seasName').value.trim();
   const price = parseFloat(document.getElementById('seasPrice').value);
   if (!name)              { toast(t.msgEnterName);  return; }
   if (isNaN(price)||price<0) { toast(t.msgEnterPrice); return; }
 
-  const dishKey = 'seas_' + Date.now();
-  if (isOnline) {
-    const room = getRoom();
-    if (!room) return;
-    const { data: itemId, error } = await supabaseClient.rpc('add_menu_item', {
-      p_bill: room.bill_id, p_dish_key: dishKey, p_name: name, p_price: price, p_kind: 'seasonal'
-    });
-    if (error || !itemId) { console.error('add_menu_item failed:', error); toast(t.onlineSaveFailed); return; }
-    menuItemIdByDishKey[dishKey] = itemId;
-    dishKeyByMenuItemId[itemId] = dishKey;
-  }
+  seasonalAddBusy = true;
+  try {
+    const dishKey = 'seas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    if (isOnline) {
+      const room = getRoom();
+      if (!room) return;
+      const { data: itemId, error } = await supabaseClient.rpc('add_menu_item', {
+        p_bill: room.bill_id, p_dish_key: dishKey, p_name: name, p_price: price, p_kind: 'seasonal'
+      });
+      if (error || !itemId) { console.error('add_menu_item failed:', error); toast(t.onlineSaveFailed); return; }
+      menuItemIdByDishKey[dishKey] = itemId;
+      dishKeyByMenuItemId[itemId] = dishKey;
+    }
 
-  settings.seasonal.push({ id: dishKey, name, price, seasonal: true, createdAt: new Date().toISOString() });
-  if (isOnline) sortMenuArrays();
-  document.getElementById('seasName').value  = '';
-  document.getElementById('seasPrice').value = '';
-  saveSettings(); renderSettings(); renderTally();
-  toast(t.msgAdded.replace('{name}', name));
+    settings.seasonal.push({ id: dishKey, name, price, seasonal: true, createdAt: new Date().toISOString() });
+    if (isOnline) sortMenuArrays();
+    document.getElementById('seasName').value  = '';
+    document.getElementById('seasPrice').value = '';
+    saveSettings(); renderSettings(); renderTally();
+    toast(t.msgAdded.replace('{name}', name));
+  } finally { seasonalAddBusy = false; }
+}
+function addSeasonalIfComplete(showErrors=false) {
+  const hasName = !!document.getElementById('seasName').value.trim();
+  const hasPrice = document.getElementById('seasPrice').value.trim() !== '';
+  if (hasName && hasPrice) return addSeasonal();
+  if (showErrors && (hasName || hasPrice)) return addSeasonal();
 }
 function newBill() {
   if (!confirm(i18n[currentLang].confirmNewBill)) return;
@@ -2660,9 +2955,28 @@ document.getElementById('discountAmount').onchange = e => {
   syncSettings({ discountAmount: settings.discount.amount });
 };
 
-document.getElementById('addSeas').onclick     = addSeasonal;
+document.getElementById('addSeas').onclick     = () => addSeasonalIfComplete(true);
+document.getElementById('saveMenuBtn').onclick = () => { document.getElementById('saveMenuName').value = ''; document.getElementById('saveMenuRestaurant').value = ''; document.querySelector('input[name=saveMenuType][value=full]').checked = true; document.getElementById('saveMenuOverlay').classList.remove('hidden'); document.getElementById('saveMenuName').focus(); };
+document.getElementById('myMenusBtn').onclick = openSavedMenus;
+document.getElementById('saveMenuCancelBtn').onclick = () => document.getElementById('saveMenuOverlay').classList.add('hidden');
+document.getElementById('saveMenuSubmitBtn').onclick = () => {
+  try {
+    const type = document.querySelector('input[name=saveMenuType]:checked').value;
+    if (type === 'seasonal' && !settings.seasonal.length) throw new Error(i18n[currentLang].emptySeasonalMenu);
+    persistMenu(serializeCurrentMenu(type, {name:document.getElementById('saveMenuName').value, restaurant:document.getElementById('saveMenuRestaurant').value}));
+    document.getElementById('saveMenuOverlay').classList.add('hidden'); toast(i18n[currentLang].menuSavedToast);
+  } catch(e) { alert(e.message); }
+};
+document.getElementById('savedMenusCloseBtn').onclick = () => document.getElementById('savedMenusOverlay').classList.add('hidden');
+document.getElementById('menuImportBtn').onclick = () => document.getElementById('menuImportFile').click();
+document.getElementById('menuImportFile').onchange = async e => { const file=e.target.files[0]; e.target.value=''; if (!file) return; try { if (file.size > 1024 * 1024) throw new Error('Menu files must be smaller than 1 MB'); openMenuImportPreview(JSON.parse(await file.text())); } catch(err) { alert(i18n[currentLang].importError.replace('{error}', err.message)); } };
+document.getElementById('menuImportApplyBtn').onclick = () => { if (!pendingImportedMenu) return; const menu=pendingImportedMenu; const applied = menu.type === 'full' ? applyFullMenu(menu) : applySeasonalSet(menu); if (applied) { closeMenuImportPreview(); document.getElementById('savedMenusOverlay').classList.add('hidden'); } };
+document.getElementById('menuImportSaveBtn').onclick = () => { if (!pendingImportedMenu) return; persistMenu(pendingImportedMenu); closeMenuImportPreview(); toast(i18n[currentLang].menuSavedToast); };
+document.getElementById('menuImportCancelBtn').onclick = closeMenuImportPreview;
 document.getElementById('seasName').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('seasPrice').focus(); });
-document.getElementById('seasPrice').addEventListener('keydown', e => { if (e.key==='Enter') addSeasonal(); });
+document.getElementById('seasName').addEventListener('blur', e => { if (e.relatedTarget !== document.getElementById('addSeas')) addSeasonalIfComplete(); });
+document.getElementById('seasPrice').addEventListener('blur', e => { if (e.relatedTarget !== document.getElementById('addSeas')) addSeasonalIfComplete(); });
+document.getElementById('seasPrice').addEventListener('keydown', e => { if (e.key==='Enter') addSeasonalIfComplete(true); });
 document.getElementById('copyBill').onclick    = copyBillSummary;
 document.getElementById('saveToHistoryBtn').onclick = saveCurrentBillToHistory;
 document.getElementById('resetPrices').onclick = resetPrices;
@@ -2675,12 +2989,21 @@ document.getElementById('lobbyCodeInput').addEventListener('keydown', e => { if 
 
 document.getElementById('createPanelSubmitBtn').onclick = submitCreatePanel;
 document.getElementById('createPanelCancelBtn').onclick = closeCreatePanel;
+document.getElementById('createMenuSelect').onchange = e => {
+  const menu = loadSavedMenus().find(m => m.id === e.target.value);
+  createPanelStandard = menu ? DEFAULT_STANDARD.map(d => ({...structuredClone(d), price:(menu.standard.find(x => x.id === d.id) || d).price})) : structuredClone(DEFAULT_STANDARD);
+  createPanelSeasonal = menu ? menu.seasonal.map(d => ({...d})) : [];
+  renderCreatePanelSeasonal();
+};
 document.getElementById('createName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('createDinerName').focus(); } });
-document.getElementById('createDinerAddBtn').onclick = addCreatePanelDiner;
-document.getElementById('createDinerName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCreatePanelDiner(); } });
-document.getElementById('createSeasAddBtn').onclick = addCreatePanelSeasonal;
+document.getElementById('createDinerAddBtn').onclick = () => addCreatePanelDiner(true);
+document.getElementById('createDinerName').addEventListener('blur', e => { if (e.relatedTarget !== document.getElementById('createDinerAddBtn')) addCreatePanelDiner(false); });
+document.getElementById('createDinerName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCreatePanelDiner(true); } });
+document.getElementById('createSeasAddBtn').onclick = () => addCreatePanelSeasonalIfComplete(true, true);
 document.getElementById('createSeasName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('createSeasPrice').focus(); } });
-document.getElementById('createSeasPrice').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCreatePanelSeasonal(); } });
+document.getElementById('createSeasName').addEventListener('blur', e => { if (e.relatedTarget !== document.getElementById('createSeasAddBtn')) addCreatePanelSeasonalIfComplete(); });
+document.getElementById('createSeasPrice').addEventListener('blur', e => { if (e.relatedTarget !== document.getElementById('createSeasAddBtn')) addCreatePanelSeasonalIfComplete(); });
+document.getElementById('createSeasPrice').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCreatePanelSeasonalIfComplete(true, true); } });
 
 document.getElementById('joinPanelSubmitBtn').onclick = () => submitJoinPanel();
 document.getElementById('joinPanelCancelBtn').onclick = closeJoinPanel;
@@ -2732,6 +3055,11 @@ if ('serviceWorker' in navigator) {
 // A shared link takes precedence over a previously saved room. Otherwise,
 // resume the active room automatically after a refresh or PWA relaunch.
 (async function enterInitialRoom() {
+  if (location.hash.startsWith('#menu=')) {
+    try { openMenuImportPreview(decodeSharedMenu(location.hash.slice(6))); }
+    catch(e) { history.replaceState(null, '', location.pathname + location.search); setTimeout(() => alert(i18n[currentLang].importError.replace('{error}', e.message)), 0); }
+    return;
+  }
   const roomFromLink = new URLSearchParams(window.location.search).get('room');
   if (roomFromLink) {
     history.replaceState(null, '', window.location.pathname);
