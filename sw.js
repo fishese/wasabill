@@ -1,4 +1,4 @@
-const CACHE = 'sushi-split-v17';
+const CACHE = 'sushi-split-v18';
 const ASSETS = [
   './index.html',
   './manifest.json',
@@ -6,12 +6,9 @@ const ASSETS = [
   './pin-fish-empty.svg',
   './pin-fish-full.svg'
 ];
-// Without these being cached *somehow*, opening the installed app with zero
-// connectivity would crash before rendering anything: the page's own script
-// calls window.supabase.createClient(...) as its very first statement, which
-// throws if that library never loaded. The QR library isn't load-bearing the
-// same way (it's only touched when the Share popup opens), but caching it
-// too means sharing a room still works even if you're offline at the table.
+// Cache optional room/QR libraries for offline relaunches. The client can now
+// render offline mode even if the Supabase script was never cached; shared-room
+// operations still require the library and network access.
 const CDN_SCRIPTS = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js'
@@ -38,7 +35,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k.startsWith('sushi-split-') && k !== CACHE).map(k => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -50,6 +47,20 @@ self.addEventListener('activate', e => {
 // opportunistically cache a successful response so it survives going
 // offline later, even though it wasn't part of the atomic install step.
 self.addEventListener('fetch', e => {
+  // Let the browser handle API writes. Never return undefined as a Response.
+  if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  const shell = new URL('./index.html', self.registration.scope);
+  const isAppNavigation = e.request.mode === 'navigate' && url.origin === shell.origin &&
+    (url.pathname === shell.pathname || url.pathname === new URL('./', shell).pathname);
+  if (isAppNavigation) {
+    // / and /?room=... must also open offline, not just the manifest's index.html.
+    e.respondWith(fetch(e.request).then(async response => {
+      if (response.ok) { const c = await caches.open(CACHE); await c.put(shell.href, response.clone()); }
+      return response;
+    }).catch(async () => (await caches.match(shell.href)) || Response.error()));
+    return;
+  }
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
@@ -61,7 +72,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE).then(c => c.put(e.request, copy));
         }
         return response;
-      }).catch(() => cached);
+      }).catch(() => Response.error());
     })
   );
 });

@@ -451,6 +451,9 @@
     padding:8px 12px;
   }
   .menu-actions{display:flex;gap:8px;flex-wrap:wrap;padding:8px 0 2px}
+  .create-menu-sources{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+  .create-menu-sources select{width:100%;min-width:0;padding:10px 6px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font-size:14px}
+  .create-menu-sources label{display:block}
   .menu-row{display:flex;gap:10px;align-items:center;padding:12px 0;border-top:1px dashed var(--line)}
   .menu-row:first-child{border-top:none}.menu-row-main{flex:1;min-width:0}.menu-row-name{font-weight:800}.menu-row-meta{font-size:12px;color:var(--muted);margin-top:2px}
   .menu-row-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}.menu-note{font-size:12px;color:var(--muted);margin:6px 0 0}
@@ -477,9 +480,15 @@
     <h1 id="lblCreatePanelTitle" style="margin:0 0 14px; font-size:18px; text-align:center;"></h1>
     <input class="text" id="createName" style="margin-bottom:6px;">
 
-    <div class="panel-section">
-      <div class="panel-section-title" id="lblCreateMenuTitle">Menu</div>
-      <select class="text" id="createMenuSelect"></select>
+    <div class="panel-section create-menu-sources">
+      <div>
+        <label class="panel-section-title" id="lblCreateMenuTitle" for="createMenuSelect">Menu</label>
+        <select id="createMenuSelect"></select>
+      </div>
+      <div>
+        <label class="panel-section-title" id="lblCreateSeasonalMenuTitle" for="createSeasonalMenuSelect">Add saved specials</label>
+        <select id="createSeasonalMenuSelect"></select>
+      </div>
     </div>
 
     <div class="panel-section">
@@ -757,7 +766,10 @@ const SHARE_ICON_SVG = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/s
 /* ── multiplayer: connect to the shared room database (Supabase) ── */
 const SUPABASE_URL = 'https://zhxjaivcthosqzzfbvqh.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_j18fuWpO4nkHk3zckOJzWg_NgO0LbOb';
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Offline functions must still boot when the optional CDN script fails to load.
+const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) || {
+  rpc: async () => ({ data:null, error:new Error('Room connection library unavailable') })
+};
 
 const LS_SETTINGS = 'kaiten_settings_v1';
 const LS_TALLY    = 'kaiten_tally_v1';
@@ -851,6 +863,7 @@ const i18n = {
     menuTitle:'Menu', menuIntro:'Save reusable restaurant menus, share them, or import one from a friend.',
     saveMenuBtn:'Save menu', myMenusBtn:'My menus', menusLocalNote:'Saved menu snapshots stay on this device.',
     importMenuBtn:'Import file', noSavedMenus:'No saved menus yet.', defaultMenu:'Default menu',
+    savedSpecialsLabel:'Add saved specials', savedSpecialsPlaceholder:'Choose a seasonal set…',
     fullMenuLabel:'Full menu', seasonalSetLabel:'Seasonal set', fullMenuOption:'Full menu', seasonalMenuOption:'Seasonal specials only',
     menuPlateCount:'{count} plates', menuSpecialCount:'{count} specials', useMenuBtn:'Use', addMenuBtn:'Add',
     exportMenuBtn:'Export', updateMenuBtn:'Update', duplicateMenuBtn:'Duplicate', editMenuBtn:'Edit', deleteMenuBtn:'Delete',
@@ -944,6 +957,7 @@ const i18n = {
     menuTitle:'餐牌', menuIntro:'儲存常用餐牌、分享俾朋友，或者匯入其他餐牌。',
     saveMenuBtn:'儲存餐牌', myMenusBtn:'我的餐牌', menusLocalNote:'已儲存嘅餐牌快照只會留喺呢部裝置。',
     importMenuBtn:'匯入檔案', noSavedMenus:'暫時未有已儲存嘅餐牌。', defaultMenu:'預設餐牌',
+    savedSpecialsLabel:'加入已儲存限定', savedSpecialsPlaceholder:'選擇季節限定組合…',
     fullMenuLabel:'完整餐牌', seasonalSetLabel:'季節限定組合', fullMenuOption:'完整餐牌', seasonalMenuOption:'只儲存季節限定',
     menuPlateCount:'{count} 款標準項目', menuSpecialCount:'{count} 款限定', useMenuBtn:'使用', addMenuBtn:'加入',
     exportMenuBtn:'匯出', updateMenuBtn:'更新', duplicateMenuBtn:'複製', editMenuBtn:'改名', deleteMenuBtn:'刪除',
@@ -964,7 +978,7 @@ const i18n = {
   }
 };
 
-let currentLang = localStorage.getItem(LS_LANG) || 'zh';
+let currentLang = ['zh', 'en'].includes(localStorage.getItem(LS_LANG)) ? localStorage.getItem(LS_LANG) : 'zh';
 let settings = loadSettings();
 let tally    = loadTally();
 window.dishRefreshers = {}; // Registry to decouple DOM from refresh actions
@@ -977,6 +991,11 @@ let seenEventIds = new Set();       // event_ids already applied -- guards again
 let roomChannel = null;             // the live realtime subscription for the current room
 let browserOnline = navigator.onLine;  // does the browser itself think it has a connection
 let channelConnected = false;          // is our realtime subscription actually live right now
+let roomSession = 0; // invalidates delayed responses after changing modes/rooms
+
+function sameRoomSession(session, billId) {
+  return isOnline && roomSession === session && getRoom()?.bill_id === billId;
+}
 
 function isConnected() { return browserOnline && channelConnected; }
 
@@ -1062,24 +1081,26 @@ function getRenderOrder() {
 function loadSettings() {
   let s;
   try { s = JSON.parse(localStorage.getItem(LS_SETTINGS)); } catch(e) {}
-  if (!s || !s.standard || !s.seasonal) return fresh();
-  if (s.serviceCharge === undefined) s.serviceCharge = true;
-  if (s.rounding      === undefined) s.rounding      = false;
-  if (!s.discount) s.discount = { enabled:false, type:'pct', amount:0 };
-  s.standard.forEach(d => {
-    if (!d.sushi && !d.kind) {
-      const map = {red:'salmon',silver:'tuna',gold:'tamago',black:'ebi'};
-      d.sushi = map[d.id] || 'salmon';
-    }
-    if (d.id === 'silver' && d.color === '#b8bcc2') {
-      d.color = '#8fa0b0';
-    }
+  const result = fresh();
+  if (!s || typeof s !== 'object') return result;
+  if (Array.isArray(s.standard)) result.standard.forEach(def => {
+    const saved = s.standard.find(d => d && d.id === def.id);
+    if (saved && Number.isFinite(saved.price) && saved.price >= 0) def.price = saved.price;
   });
-  // Add any default plates introduced in a newer version that an older save is missing
-  DEFAULT_STANDARD.forEach(def => {
-    if (!s.standard.some(d => d.id === def.id)) s.standard.push(structuredClone(def));
-  });
-  return s;
+  const ids = new Set(result.standard.map(d => d.id));
+  if (Array.isArray(s.seasonal)) result.seasonal = s.seasonal.filter(d => {
+    if (!d || typeof d.id !== 'string' || !d.id.startsWith('seas_') || ids.has(d.id) ||
+        typeof d.name !== 'string' || !d.name.trim() || !Number.isFinite(d.price) || d.price < 0) return false;
+    ids.add(d.id); return true;
+  }).map(d => ({id:d.id, name:d.name, price:d.price, seasonal:true, createdAt:d.createdAt}));
+  if (typeof s.serviceCharge === 'boolean') result.serviceCharge = s.serviceCharge;
+  if (typeof s.rounding === 'boolean') result.rounding = s.rounding;
+  if (s.discount && typeof s.discount === 'object') {
+    const type = s.discount.type === 'fixed' ? 'fixed' : 'pct';
+    result.discount = { enabled:s.discount.enabled === true, type,
+      amount:Number.isFinite(s.discount.amount) ? Math.max(0, Math.min(type === 'pct' ? 100 : Number.MAX_VALUE, s.discount.amount)) : 0 };
+  }
+  return result;
 }
 function fresh() {
   return {
@@ -1092,7 +1113,15 @@ function saveSettings() { if (isOnline) return; localStorage.setItem(LS_SETTINGS
 function loadTally() {
   try {
     const t = JSON.parse(localStorage.getItem(LS_TALLY));
-    if (t && t.people && t.people.length) return t;
+    if (t && Array.isArray(t.people)) {
+      const dishIds = new Set([...settings.standard, ...settings.seasonal].map(d => d.id));
+      const people = t.people.filter(p => p && typeof p === 'object').slice(0, MAX_PEOPLE).map(p => ({
+        name:typeof p.name === 'string' ? p.name : '',
+        counts:Object.fromEntries(Object.entries(p.counts && typeof p.counts === 'object' ? p.counts : {})
+          .filter(([id, n]) => dishIds.has(id) && Number.isSafeInteger(n) && n > 0))
+      }));
+      if (people.length) return {people};
+    }
   } catch(e) {}
   return { people:[{name:'', counts:{}}] };
 }
@@ -1112,10 +1141,10 @@ function normalizeMenuV1(value) {
   if (!['full', 'seasonal'].includes(value.type)) throw new Error('Invalid menu type');
   const menu = { wasabillMenu:1, type:value.type, name:menuText(value.name, 100, 'menu name'), restaurant:menuText(value.restaurant, 100, 'restaurant', true), seasonal:[] };
   if (value.type === 'full') {
-    if (!Array.isArray(value.standard)) throw new Error('A full menu needs standard dishes');
+    if (!Array.isArray(value.standard) || value.standard.length > DEFAULT_STANDARD.length) throw new Error('A full menu needs standard dishes');
     const seen = new Set();
     menu.standard = value.standard.map(d => {
-      if (!d || typeof d !== 'object' || !DEFAULT_BY_ID[d.id] || seen.has(d.id)) throw new Error('Invalid standard dish');
+      if (!d || typeof d.id !== 'string' || !Object.hasOwn(DEFAULT_BY_ID, d.id) || seen.has(d.id)) throw new Error('Invalid standard dish');
       seen.add(d.id); const price = d.price;
       if (typeof price !== 'number' || !Number.isFinite(price) || price < 0) throw new Error('Invalid standard price');
       return {id:d.id, price};
@@ -1135,10 +1164,13 @@ function loadSavedMenus() {
   try { raw = JSON.parse(localStorage.getItem(LS_MENUS)); } catch(e) { return []; }
   if (!Array.isArray(raw)) return [];
   const ids = new Set();
-  return raw.slice(0, 200).flatMap(item => {
+  return raw.flatMap((item, index) => {
     try {
       const menu = normalizeMenuV1(item);
-      const storedId = typeof item.id === 'string' && item.id.length <= 100 && !ids.has(item.id) ? item.id : menuId();
+      // Deterministic repair keeps Use/Rename/Delete stable across reads, even
+      // when storage is read-only. A later library edit persists repaired IDs.
+      let storedId = typeof item.id === 'string' && item.id.length > 0 && item.id.length <= 100 && !ids.has(item.id) ? item.id : `menu_recovered_${index}`;
+      while (ids.has(storedId)) storedId += '_';
       ids.add(storedId);
       return [{...menu, id:storedId, createdAt:typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(), updatedAt:typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString()}];
     } catch(e) { return []; }
@@ -1155,46 +1187,63 @@ function applySeasonalSet(menu) {
   const incoming = normalizeMenuV1(menu);
   const uniqueIncoming = new Map();
   incoming.seasonal.forEach(d => uniqueIncoming.set(normalizedDishName(d.name), d));
-  const remoteOps = [];
+  if (isOnline) {
+    const session = roomSession, room = getRoom();
+    if (!room) return Promise.resolve(false);
+    // Match when the queued operation executes, so rapid reapplications see
+    // acknowledged additions. Do not expose untallyable rows before RPC success.
+    return queueRoomMenuSync(async () => {
+      for (const dish of uniqueIncoming.values()) {
+        if (!sameRoomSession(session, room.bill_id)) return false;
+        const found = settings.seasonal.find(x => normalizedDishName(x.name) === normalizedDishName(dish.name));
+        if (found) await updateSavedSeasonalInRoom({...found, price:dish.price});
+        else await syncSavedSeasonalToRoom({id:'seas_' + menuId(), ...dish, seasonal:true});
+      }
+      if (!sameRoomSession(session, room.bill_id)) return false;
+      toast(i18n[currentLang].seasonalAddedToast);
+      return true;
+    });
+  }
   uniqueIncoming.forEach(d => {
     const found = settings.seasonal.find(x => normalizedDishName(x.name) === normalizedDishName(d.name));
-    if (found) { found.price = d.price; remoteOps.push({kind:'update', dish:found}); }
+    if (found) { found.price = d.price; }
     else {
       const added = {id:'seas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name:d.name, price:d.price, seasonal:true, createdAt:new Date().toISOString()};
-      settings.seasonal.push(added); remoteOps.push({kind:'add', dish:added});
+      settings.seasonal.push(added);
     }
   });
   saveSettings(); renderSettings(); renderTally();
-  queueRoomMenuSync(async () => {
-    for (const op of remoteOps) {
-      if (op.kind === 'add') await syncSavedSeasonalToRoom(op.dish);
-      else await updateSavedSeasonalInRoom(op.dish);
-    }
-  });
   toast(i18n[currentLang].seasonalAddedToast); return true;
 }
 async function syncSavedSeasonalToRoom(dish) {
   if (!isOnline) return; const room = getRoom(); if (!room) return;
+  const session = roomSession;
   const {data:itemId, error} = await supabaseClient.rpc('add_menu_item', {p_bill:room.bill_id, p_dish_key:dish.id, p_name:dish.name, p_price:dish.price, p_kind:'seasonal'});
-  if (error) throw error;
-  if (itemId) { menuItemIdByDishKey[dish.id] = itemId; dishKeyByMenuItemId[itemId] = dish.id; }
+  if (error || !itemId) throw error || new Error('Menu item was not saved');
+  if (!sameRoomSession(session, room.bill_id)) return;
+  // If realtime delivered the row first, retain that newer authoritative row.
+  if (!menuItemIdByDishKey[dish.id]) applyRemoteMenuItemUpsert({id:itemId, dish_key:dish.id, name:dish.name, price:dish.price, kind:'seasonal', is_active:true});
 }
 async function updateSavedSeasonalInRoom(dish) {
-  if (!isOnline) return; const room = getRoom(); const itemId = menuItemIdByDishKey[dish.id]; if (!room || !itemId) return;
+  if (!isOnline) return; const room = getRoom(); const itemId = menuItemIdByDishKey[dish.id]; if (!room || !itemId) throw new Error('Menu item no longer exists');
+  const session = roomSession;
   const {error} = await supabaseClient.rpc('update_menu_item', {p_bill:room.bill_id, p_item:itemId, p_price:dish.price});
   if (error) throw error;
+  if (!sameRoomSession(session, room.bill_id)) return;
+  const current = settings.seasonal.find(d => d.id === dish.id);
+  if (current) { current.price = dish.price; renderSettings(); renderTally(); }
 }
 let roomMenuSyncQueue = Promise.resolve();
 function queueRoomMenuSync(work) {
   if (!isOnline) return Promise.resolve();
-  roomMenuSyncQueue = roomMenuSyncQueue.then(work).catch(error => { console.error('saved menu sync failed:', error); toast(i18n[currentLang].onlineSaveFailed); });
+  roomMenuSyncQueue = roomMenuSyncQueue.then(work).catch(error => { console.error('saved menu sync failed:', error); toast(i18n[currentLang].onlineSaveFailed); return false; });
   return roomMenuSyncQueue;
 }
 function applyFullMenu(menu) {
   const incoming = normalizeMenuV1(menu);
   if (isOnline) { alert(i18n[currentLang].activeSharedMenu.replace('{name}', incoming.name)); return false; }
   const proceed = () => {
-    if (hasAnyTallies()) tally.people.forEach(p => p.counts = {});
+    tally.people.forEach(p => p.counts = {});
     const prices = Object.fromEntries(incoming.standard.map(d => [d.id, d.price]));
     settings.standard = DEFAULT_STANDARD.map(d => ({...structuredClone(d), price:Object.hasOwn(prices, d.id) ? prices[d.id] : d.price}));
     settings.seasonal = incoming.seasonal.map(d => ({id:'seas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name:d.name, price:d.price, seasonal:true, createdAt:new Date().toISOString()}));
@@ -1234,7 +1283,7 @@ function openSavedMenus() {
     const meta = document.createElement('div'); meta.className = 'menu-row-meta'; meta.textContent = `${menu.type === 'full' ? t.fullMenuLabel : t.seasonalSetLabel} · ${savedMenuSummary(menu)}${menu.restaurant ? ` · ${menu.restaurant}` : ''}`; main.append(name, meta);
     const actions = document.createElement('div'); actions.className = 'menu-row-actions';
     const action = (label, fn) => { const b=document.createElement('button'); b.className='btn ghost sm'; b.textContent=label; b.onclick=fn; actions.appendChild(b); };
-    action(menu.type === 'full' ? t.useMenuBtn : t.addMenuBtn, () => { const applied = menu.type === 'full' ? applyFullMenu(menu) : applySeasonalSet(menu); if (applied) document.getElementById('savedMenusOverlay').classList.add('hidden'); });
+    action(menu.type === 'full' ? t.useMenuBtn : t.addMenuBtn, async () => { const applied = await (menu.type === 'full' ? applyFullMenu(menu) : applySeasonalSet(menu)); if (applied) document.getElementById('savedMenusOverlay').classList.add('hidden'); });
     action(t.shareBtn, () => shareMenu(menu)); action(t.exportMenuBtn, () => downloadMenu(menu));
     action(t.updateMenuBtn, () => { const menus=loadSavedMenus(); const idx=menus.findIndex(m => m.id === menu.id); if (idx < 0) return; try { const current=serializeCurrentMenu(menu.type, menu); if (menu.type === 'seasonal' && !current.seasonal.length) throw new Error(t.emptySeasonalMenu); menus[idx]={...current,id:menu.id,createdAt:menu.createdAt,updatedAt:new Date().toISOString()}; saveSavedMenus(menus); openSavedMenus(); toast(t.menuUpdatedToast); } catch(e) { alert(e.message); } });
     action(t.duplicateMenuBtn, () => { try { const copy=persistMenu({...menu, name:`${menu.name.slice(0, 95)} copy`}); openSavedMenus(); toast(t.duplicateMenuToast.replace('{name}', copy.name)); } catch(e) { alert(e.message); } });
@@ -1254,7 +1303,10 @@ function shareMenu(menu) {
   if (navigator.share) navigator.share({title:menu.name, text, url}).catch(error => { if (error && error.name !== 'AbortError') copyMenuLink(url); });
   else copyMenuLink(url);
 }
-function copyMenuLink(url) { navigator.clipboard.writeText(url).then(() => toast(i18n[currentLang].menuLinkCopied)).catch(() => prompt(i18n[currentLang].copyLinkBtn, url)); }
+async function copyMenuLink(url) {
+  try { await navigator.clipboard.writeText(url); toast(i18n[currentLang].menuLinkCopied); }
+  catch(e) { prompt(i18n[currentLang].copyLinkBtn, url); }
+}
 function openMenuImportPreview(menu) {
   pendingImportedMenu = normalizeMenuV1(menu);
   document.getElementById('menuImportTitle').textContent = pendingImportedMenu.name;
@@ -1268,6 +1320,26 @@ function renderCreateMenuOptions() {
   const defaultOption = document.createElement('option'); defaultOption.value = ''; defaultOption.textContent = i18n[currentLang].defaultMenu; select.appendChild(defaultOption);
   loadSavedMenus().filter(m => m.type === 'full').forEach(menu => { const o=document.createElement('option'); o.value=menu.id; o.textContent=menu.restaurant ? `${menu.name} — ${menu.restaurant}` : menu.name; select.appendChild(o); });
   select.value = [...select.options].some(o => o.value === selected) ? selected : '';
+  const seasonalSelect = document.getElementById('createSeasonalMenuSelect');
+  seasonalSelect.textContent = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = ''; placeholder.textContent = i18n[currentLang].savedSpecialsPlaceholder;
+  seasonalSelect.appendChild(placeholder);
+  loadSavedMenus().filter(m => m.type === 'seasonal').forEach(menu => {
+    const option = document.createElement('option'); option.value = menu.id; option.textContent = menu.name;
+    seasonalSelect.appendChild(option);
+  });
+}
+function addSavedSpecialsToCreatePanel(id) {
+  if (createPanelBusy) return;
+  const menu = loadSavedMenus().find(m => m.id === id && m.type === 'seasonal');
+  if (!menu) return;
+  menu.seasonal.forEach(dish => {
+    const found = createPanelSeasonal.find(d => normalizedDishName(d.name) === normalizedDishName(dish.name));
+    if (found) found.price = dish.price;
+    else createPanelSeasonal.push({...dish});
+  });
+  renderCreatePanelSeasonal();
 }
 
 /* ── i18n ── */
@@ -1337,6 +1409,7 @@ function updateStaticLabels() {
   document.getElementById('menuImportCancelBtn').textContent = t.createPanelCancelBtn;
   document.getElementById('lblCreatePanelTitle').textContent       = t.createPanelTitle;
   document.getElementById('lblCreateMenuTitle').textContent        = t.menuTitle;
+  document.getElementById('lblCreateSeasonalMenuTitle').textContent = t.savedSpecialsLabel;
   document.getElementById('createName').placeholder               = t.createNamePlaceholder;
   document.getElementById('lblCreatePanelDinersTitle').textContent = t.createPanelDinersTitle;
   document.getElementById('createDinerName').placeholder          = t.createDinerPlaceholder;
@@ -1490,14 +1563,18 @@ function computeBillBreakdown() {
       : Math.min(settings.discount.amount, grandRaw);
   }
 
-  const personDiscs = rawTotals.map(sub =>
-    grandRaw > 0 ? Math.round((sub / grandRaw) * discAmt * 100) / 100 : 0
-  );
-  if (discAmt > 0 && grandRaw > 0) {
-    const discUsed = personDiscs.reduce((a, b) => a + b, 0);
-    personDiscs[personDiscs.length - 1] =
-      Math.round((personDiscs[personDiscs.length - 1] + discAmt - discUsed) * 100) / 100;
-  }
+  // Allocate whole cents by largest remainder. Giving all rounding error to
+  // the last person could make their discount negative, even with no food.
+  const discountCents = Math.round(discAmt * 100);
+  discAmt = discountCents / 100;
+  const shares = rawTotals.map((sub, idx) => {
+    const exact = grandRaw > 0 ? sub / grandRaw * discountCents : 0;
+    return {idx, cents:Math.floor(exact), remainder:exact - Math.floor(exact)};
+  });
+  let remaining = discountCents - shares.reduce((sum, s) => sum + s.cents, 0);
+  [...shares].filter(s => rawTotals[s.idx] > 0).sort((a,b) => b.remainder - a.remainder || a.idx - b.idx)
+    .forEach(s => { if (remaining > 0) { s.cents++; remaining--; } });
+  const personDiscs = shares.map(s => s.cents / 100);
 
   let grandFinal = 0;
   let grandPlates = 0;
@@ -2092,6 +2169,7 @@ function closeShareModal() {
 function goOfflineFork() {
   const t = i18n[currentLang];
   if (!confirm(t.confirmForkOffline)) return;
+  roomSession++;
   const room = getRoom();
 
   isOnline = false; // flips saveSettings()/saveTally() back on, see below
@@ -2139,7 +2217,7 @@ let createPanelBusy = false;
 function setCreatePanelBusy(busy) {
   createPanelBusy = busy;
   const overlay = document.getElementById('createPanelOverlay');
-  overlay.querySelectorAll('input, button').forEach(el => { el.disabled = busy; });
+  overlay.querySelectorAll('input, button, select').forEach(el => { el.disabled = busy; });
   const btn = document.getElementById('createPanelSubmitBtn');
   btn.classList.toggle('is-loading', busy);
   btn.setAttribute('aria-busy', String(busy));
@@ -2149,6 +2227,7 @@ function setCreatePanelBusy(busy) {
 }
 
 function openCreatePanel() {
+  roomSession++;
   createPanelDiners = [];
   createPanelSeasonal = [];
   createPanelStandard = structuredClone(DEFAULT_STANDARD);
@@ -2286,25 +2365,42 @@ async function submitCreatePanel() {
    of typing a new name. ── */
 let joinPanelRoomData = null;
 let joinPanelCode = null;
+let joinPanelBusy = false;
+let joinPanelAddedDinerId = null; // retain an acknowledged add if the refresh fails
+let joinLookupBusy = false;
+
+function setJoinPanelBusy(busy) {
+  joinPanelBusy = busy;
+  document.getElementById('joinPanelOverlay').querySelectorAll('input, button').forEach(el => { el.disabled = busy; });
+}
 
 async function joinRoomByCode() {
   const t = i18n[currentLang];
   const input = document.getElementById('lobbyCodeInput');
   const code = input.value.trim().toLowerCase();
-  if (!code) return;
+  if (!code || joinLookupBusy) return;
+  const session = ++roomSession;
   const btn = document.getElementById('lobbyJoinBtn');
+  joinLookupBusy = true;
   btn.disabled = true;
-  const { data, error } = await supabaseClient.rpc('join_room', { p_room: code });
-  btn.disabled = false;
-  if (error || !data || !data.bill) {
-    toast(t.lobbyInvalidCode);
-    return;
+  try {
+    const { data, error } = await supabaseClient.rpc('join_room', { p_room: code });
+    if (roomSession !== session) return;
+    if (error || !data || !data.bill) { toast(t.lobbyInvalidCode); return; }
+    openJoinPanel(code, data);
+  } catch (error) {
+    console.error('join lookup failed:', error);
+    if (roomSession === session) toast(t.lobbyNetworkError);
+  } finally {
+    joinLookupBusy = false;
+    btn.disabled = false;
   }
-  openJoinPanel(code, data);
 }
 
 function openJoinPanel(code, data) {
   const t = i18n[currentLang];
+  joinPanelAddedDinerId = null;
+  setJoinPanelBusy(false);
   joinPanelCode = code;
   joinPanelRoomData = data;
   // Every existing diner remains adoptable. The room code is intentionally
@@ -2340,62 +2436,61 @@ function openJoinPanel(code, data) {
   else document.getElementById('joinName').focus();
 }
 function closeJoinPanel() {
+  if (joinPanelBusy) return;
   document.getElementById('joinPanelOverlay').classList.add('hidden');
   joinPanelRoomData = null;
   joinPanelCode = null;
+  joinPanelAddedDinerId = null;
 }
 
 async function submitJoinPanel(opts) {
   const t = i18n[currentLang];
-  if (!joinPanelRoomData) return;
+  if (!joinPanelRoomData || joinPanelBusy) return;
   const existingDinerId = opts && opts.existingDinerId;
   if (existingDinerId && opts.needsReclaimConfirmation) {
     const dinerName = opts.existingDinerName || t.personDefault;
     if (!confirm(t.confirmReclaimDiner.replace('{name}', dinerName))) return;
   }
-  const submitBtn = document.getElementById('joinPanelSubmitBtn');
-  submitBtn.disabled = true;
-
-  let dinerId = existingDinerId;
-  let snap = joinPanelRoomData;
-
-  if (!dinerId) {
-    const name = document.getElementById('joinName').value.trim();
-    if ((joinPanelRoomData.diners || []).length >= MAX_PEOPLE) {
-      submitBtn.disabled = false;
-      toast(t.maxPeopleMsg);
-      return;
+  const session = roomSession, code = joinPanelCode, billId = joinPanelRoomData.bill.id;
+  setJoinPanelBusy(true);
+  try {
+    let dinerId = existingDinerId || joinPanelAddedDinerId;
+    if (!dinerId) {
+      const name = document.getElementById('joinName').value.trim();
+      if ((joinPanelRoomData.diners || []).length >= MAX_PEOPLE) { toast(t.maxPeopleMsg); return; }
+      const { data, error } = await supabaseClient.rpc('add_diner', { p_bill: billId, p_name: name });
+      if (error || !data) throw error || new Error('Diner was not saved');
+      if (roomSession !== session) return;
+      dinerId = joinPanelAddedDinerId = data;
     }
-    const { data: newDinerId, error: dinerErr } = await supabaseClient.rpc('add_diner', { p_bill: joinPanelRoomData.bill.id, p_name: name });
-    if (dinerErr) {
-      submitBtn.disabled = false;
-      console.error('add_diner failed:', dinerErr);
+    // Existing picks need a fresh snapshot too: the table may have changed
+    // while the name/pick panel was open.
+    const fresh = await supabaseClient.rpc('join_room', { p_room: code });
+    if (roomSession !== session) return;
+    if (fresh.error || fresh.data?.bill?.id !== billId) throw fresh.error || new Error('Room no longer available');
+    const snap = fresh.data;
+    if (!(snap.diners || []).some(d => d.id === dinerId)) {
+      setJoinPanelBusy(false);
+      openJoinPanel(code, snap);
       toast(t.lobbyNetworkError);
       return;
     }
-    dinerId = newDinerId;
-    // re-fetch the full room state now that we've been added, so the fold includes us
-    const fresh = await supabaseClient.rpc('join_room', { p_room: joinPanelCode });
-    if (fresh.error || !fresh.data) {
-      submitBtn.disabled = false;
-      console.error('re-fetch after join failed:', fresh.error);
-      toast(t.lobbyNetworkError);
-      return;
-    }
-    snap = fresh.data;
-  }
-
-  submitBtn.disabled = false;
-  saveRoom({ bill_id: snap.bill.id, room_code: snap.bill.room_code, diner_id: dinerId, device_id: getDeviceId() });
-  enterRoom(snap);
-  showRoomBadge(snap.bill.room_code);
-  closeJoinPanel();
-  hideLobby();
-  toast(t.lobbyJoinedRoom.replace('{code}', snap.bill.room_code));
-  claimDiner(dinerId); // you obviously are the diner you just claimed/created
+    saveRoom({ bill_id: billId, room_code: snap.bill.room_code, diner_id: dinerId, device_id: getDeviceId() });
+    enterRoom(snap);
+    showRoomBadge(snap.bill.room_code);
+    setJoinPanelBusy(false);
+    closeJoinPanel();
+    hideLobby();
+    toast(t.lobbyJoinedRoom.replace('{code}', snap.bill.room_code));
+    claimDiner(dinerId);
+  } catch (error) {
+    console.error('join room failed:', error);
+    if (roomSession === session) toast(t.lobbyNetworkError);
+  } finally { setJoinPanelBusy(false); }
 }
 
 function useOffline() {
+  roomSession++;
   // Choosing the standalone mode explicitly abandons any saved room resume
   // pointer. Keeping it would mislabel later offline history with that room.
   localStorage.removeItem('kaiten_room_v1');
@@ -2409,8 +2504,10 @@ function useOffline() {
 async function restoreSavedRoom() {
   const room = getRoom();
   if (!room || !room.room_code) return false;
+  const session = roomSession;
 
   const { data, error } = await supabaseClient.rpc('join_room', { p_room: room.room_code });
+  if (roomSession !== session || getRoom()?.bill_id !== room.bill_id) return false;
   if (error) {
     console.error('restore saved room failed:', error);
     toast(i18n[currentLang].lobbyNetworkError);
@@ -2438,6 +2535,7 @@ async function restoreSavedRoom() {
 // render/calc function (computeBillBreakdown, renderTally, renderStickyNav...)
 // runs unchanged on synced data.
 function enterRoom(snap) {
+  roomSession++;
   applySnapshot(snap);
   subscribeToRoom(snap.bill.id);
 }
@@ -2504,30 +2602,34 @@ function applySnapshot(snap) {
 // without anyone needing to reload. Also doubles as our connection-status
 // sensor: its subscribe status tells us whether we're actually still live.
 function subscribeToRoom(billId) {
+  const session = roomSession;
+  const current = () => sameRoomSession(session, billId);
+  const guarded = fn => payload => { if (current()) fn(payload); };
   if (roomChannel) { supabaseClient.removeChannel(roomChannel); roomChannel = null; }
   channelConnected = false;
   let firstConnect = true; // skip the redundant resync right after the very first subscribe
   roomChannel = supabaseClient
     .channel('room-' + billId)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'plate_events', filter: `bill_id=eq.${billId}` },
-        payload => applyRemoteEvent(payload.new))
+        guarded(payload => applyRemoteEvent(payload.new)))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
-        payload => applyRemoteDiner(payload.new))
+        guarded(payload => applyRemoteDiner(payload.new)))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
-        payload => applyRemoteDinerRename(payload.new))
+        guarded(payload => applyRemoteDinerRename(payload.new)))
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'diners', filter: `bill_id=eq.${billId}` },
-        payload => applyRemoteDinerRemoval(payload.old))
+        guarded(payload => applyRemoteDinerRemoval(payload.old)))
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'menu_items', filter: `bill_id=eq.${billId}` },
-        payload => applyRemoteMenuItemUpsert(payload.new))
+        guarded(payload => applyRemoteMenuItemUpsert(payload.new)))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'menu_items', filter: `bill_id=eq.${billId}` },
-        payload => applyRemoteMenuItemUpsert(payload.new))
+        guarded(payload => applyRemoteMenuItemUpsert(payload.new)))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bills', filter: `id=eq.${billId}` },
-        payload => {
+        guarded(payload => {
           if (payload.new.status === 'closed') { handleBillClosed(); return; }
           applyRemoteBillSettings(payload.new);
-        })
-    .on('presence', { event: 'sync' }, () => updatePresenceUI())
+        }))
+    .on('presence', { event: 'sync' }, guarded(() => updatePresenceUI()))
     .subscribe((status) => {
+      if (!current()) return;
       const wasConnected = channelConnected;
       channelConnected = (status === 'SUBSCRIBED');
       updateConnectionUI();
@@ -2549,7 +2651,9 @@ function subscribeToRoom(billId) {
 async function claimDiner(dinerId) {
   const room = getRoom();
   if (!room) return;
+  const session = roomSession;
   const { error } = await supabaseClient.rpc('claim_diner', { p_bill: room.bill_id, p_diner: dinerId, p_device: getDeviceId() });
+  if (!sameRoomSession(session, room.bill_id)) return;
   if (error) { console.error('claim_diner failed:', error); toast(i18n[currentLang].onlineSaveFailed); return; }
   const person = tally.people.find(p => p.id === dinerId);
   if (person) person.claimed = true;
@@ -2602,7 +2706,9 @@ function updatePresenceUI() {
 async function resyncRoom() {
   const room = getRoom();
   if (!room) return;
+  const session = roomSession;
   const { data, error } = await supabaseClient.rpc('join_room', { p_room: room.room_code });
+  if (!sameRoomSession(session, room.bill_id) || data?.bill?.id !== room.bill_id) return;
   if (error || !data) { console.error('resync after reconnect failed:', error); return; }
   applySnapshot(data);
   toast(i18n[currentLang].connectionRestored);
@@ -2665,6 +2771,7 @@ function applyRemoteMenuItemUpsert(item) {
   settings.standard = settings.standard.filter(d => d.id !== item.dish_key);
   settings.seasonal = settings.seasonal.filter(d => d.id !== item.dish_key);
   delete menuItemIdByDishKey[item.dish_key];
+  delete dishKeyByMenuItemId[item.id];
 
   if (!item.is_active) {
     // archived -- drop any outstanding tally too, matching the local archive behavior
@@ -2852,25 +2959,34 @@ async function addSeasonal() {
   if (isNaN(price)||price<0) { toast(t.msgEnterPrice); return; }
 
   seasonalAddBusy = true;
+  const session = roomSession, room = isOnline ? getRoom() : null;
+  const originalPrice = document.getElementById('seasPrice').value;
   try {
     const dishKey = 'seas_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
     if (isOnline) {
-      const room = getRoom();
       if (!room) return;
       const { data: itemId, error } = await supabaseClient.rpc('add_menu_item', {
         p_bill: room.bill_id, p_dish_key: dishKey, p_name: name, p_price: price, p_kind: 'seasonal'
       });
       if (error || !itemId) { console.error('add_menu_item failed:', error); toast(t.onlineSaveFailed); return; }
+      if (!sameRoomSession(session, room.bill_id)) return;
       menuItemIdByDishKey[dishKey] = itemId;
       dishKeyByMenuItemId[itemId] = dishKey;
     }
 
-    settings.seasonal.push({ id: dishKey, name, price, seasonal: true, createdAt: new Date().toISOString() });
+    if (!settings.seasonal.some(d => d.id === dishKey)) {
+      settings.seasonal.push({ id: dishKey, name, price, seasonal: true, createdAt: new Date().toISOString() });
+    }
     if (isOnline) sortMenuArrays();
-    document.getElementById('seasName').value  = '';
-    document.getElementById('seasPrice').value = '';
+    // A slow save must not clear the user's next draft.
+    if (document.getElementById('seasName').value.trim() === name && document.getElementById('seasPrice').value === originalPrice) {
+      document.getElementById('seasName').value = '';
+      document.getElementById('seasPrice').value = '';
+    }
     saveSettings(); renderSettings(); renderTally();
     toast(t.msgAdded.replace('{name}', name));
+  } catch(error) {
+    console.error('add seasonal failed:', error); toast(t.onlineSaveFailed);
   } finally { seasonalAddBusy = false; }
 }
 function addSeasonalIfComplete(showErrors=false) {
@@ -2970,7 +3086,16 @@ document.getElementById('saveMenuSubmitBtn').onclick = () => {
 document.getElementById('savedMenusCloseBtn').onclick = () => document.getElementById('savedMenusOverlay').classList.add('hidden');
 document.getElementById('menuImportBtn').onclick = () => document.getElementById('menuImportFile').click();
 document.getElementById('menuImportFile').onchange = async e => { const file=e.target.files[0]; e.target.value=''; if (!file) return; try { if (file.size > 1024 * 1024) throw new Error('Menu files must be smaller than 1 MB'); openMenuImportPreview(JSON.parse(await file.text())); } catch(err) { alert(i18n[currentLang].importError.replace('{error}', err.message)); } };
-document.getElementById('menuImportApplyBtn').onclick = () => { if (!pendingImportedMenu) return; const menu=pendingImportedMenu; const applied = menu.type === 'full' ? applyFullMenu(menu) : applySeasonalSet(menu); if (applied) { closeMenuImportPreview(); document.getElementById('savedMenusOverlay').classList.add('hidden'); } };
+document.getElementById('menuImportApplyBtn').onclick = async () => {
+  if (!pendingImportedMenu) return;
+  const menu=pendingImportedMenu, button=document.getElementById('menuImportApplyBtn');
+  if (button.disabled) return;
+  button.disabled=true;
+  try {
+    const applied=await (menu.type === 'full' ? applyFullMenu(menu) : applySeasonalSet(menu));
+    if (applied && pendingImportedMenu === menu) { closeMenuImportPreview(); document.getElementById('savedMenusOverlay').classList.add('hidden'); }
+  } finally { button.disabled=false; }
+};
 document.getElementById('menuImportSaveBtn').onclick = () => { if (!pendingImportedMenu) return; persistMenu(pendingImportedMenu); closeMenuImportPreview(); toast(i18n[currentLang].menuSavedToast); };
 document.getElementById('menuImportCancelBtn').onclick = closeMenuImportPreview;
 document.getElementById('seasName').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('seasPrice').focus(); });
@@ -2990,10 +3115,15 @@ document.getElementById('lobbyCodeInput').addEventListener('keydown', e => { if 
 document.getElementById('createPanelSubmitBtn').onclick = submitCreatePanel;
 document.getElementById('createPanelCancelBtn').onclick = closeCreatePanel;
 document.getElementById('createMenuSelect').onchange = e => {
+  if (createPanelBusy) return;
   const menu = loadSavedMenus().find(m => m.id === e.target.value);
   createPanelStandard = menu ? DEFAULT_STANDARD.map(d => ({...structuredClone(d), price:(menu.standard.find(x => x.id === d.id) || d).price})) : structuredClone(DEFAULT_STANDARD);
   createPanelSeasonal = menu ? menu.seasonal.map(d => ({...d})) : [];
   renderCreatePanelSeasonal();
+};
+document.getElementById('createSeasonalMenuSelect').onchange = e => {
+  addSavedSpecialsToCreatePanel(e.target.value);
+  e.target.value = '';
 };
 document.getElementById('createName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('createDinerName').focus(); } });
 document.getElementById('createDinerAddBtn').onclick = () => addCreatePanelDiner(true);
